@@ -1,0 +1,57 @@
+# RADONAIX — Prometheus scrape config (system + app monitoring).
+# All targets are localhost: node_exporter (system) + the FastAPI app's /metrics
+# (request rate, latency, errors). Prometheus itself binds to 127.0.0.1:9090
+# (see deploy/systemd/prometheus.service) and is reached via nginx /grafana only
+# through Grafana — it is not exposed publicly.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: radonaix
+
+scrape_configs:
+  # The application — gunicorn exposes /metrics at root (NOT under /api).
+  - job_name: radonaix_api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:8000"]
+        labels:
+          service: radonaix-api
+
+  # System metrics — CPU, RAM, disk, network, filesystem.
+  # The `server` label distinguishes hosts once we monitor more than one (see
+  # docs/MONITORING.md §9). To add the AIR server: uncomment its target below,
+  # bind node_exporter on .133 to its private IP, firewall :9100 to this host,
+  # then `systemctl reload prometheus`.
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+        labels:
+          service: host
+          server: sdp-142
+      # --- AIR server (10.200.37.133) — enable in Phase 2 ---
+      # - targets: ["10.200.37.133:9100"]
+      #   labels:
+      #     service: host
+      #     server: air-133
+
+  # Postgres metrics (connections vs max_connections, per-DB backends, etc.).
+  # Same pattern: the .133 exporter points at the AIR Postgres. Uncomment, bind
+  # postgres_exporter on .133 to its private IP, firewall :9187 to this host.
+  - job_name: postgres
+    static_configs:
+      - targets: ["127.0.0.1:9187"]
+        labels:
+          service: postgres
+          server: sdp-142
+      # --- AIR server (10.200.37.133) — enable in Phase 2 ---
+      # - targets: ["10.200.37.133:9187"]
+      #   labels:
+      #     service: postgres
+      #     server: air-133
+
+  # Prometheus self-monitoring.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]

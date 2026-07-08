@@ -1,0 +1,1 @@
+python -c "import secrets; print(secrets.token_urlsafe(48))"  →  JWT_SECRET

@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node / UI (when the frontend is added) ---
+node_modules/
+dist/
+build/
+.next/
+*.local
+
+# --- Generated pipeline outputs ---
+radonaix-recon-mvp/out/
+
+# --- Source data (telecom extracts — sensitive, do NOT commit) ---
+radonaix-recon-mvp/data/
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- OS / editor cruft ---
+.DS_Store
+*.zip
+.idea/
+.vscode/
