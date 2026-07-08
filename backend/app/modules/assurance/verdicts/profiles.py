@@ -1,28 +1,27 @@
-"""IT2 + CWW fuzzy logic system: vocabulary, rule base, and decoder.
+"""Per-report verdict profiles.
 
-Ported from the recon MVP's ``fuzzy/verdict.py`` with the pandas dependency
-removed — ``score_row`` takes a plain dict (the hourly discrepancy vector) instead
-of a DataFrame row, so it runs inside the FastAPI request path.
+Adding a report/use-case = adding a :class:`VerdictProfile` here (its vocabulary
++ rule base); the engine, codebook, and CWW decoder are shared. Recon is
+profile #1. Planned next profiles (see roadmap): file-collection, file-sequence
+(reuses the catch-up idea), cross-recon, and the overview roll-up.
 
-Inputs (all crisp, already computed by the Layer-1 aggregation):
-    count_gap : unexplained count gap % (after catch-up credit)
-    value_gap : value gap %
-    dup_rate  : duplicate rate % on the processed side
-    catchup   : % of the hour's gap explained by late arrival
-    mismatch  : matched keys whose amounts disagree, %
-    traffic   : hour traffic as % of the day's peak hour (context)
+Each profile is the *fuzzy spec* only. The crisp feature vector it scores is
+produced by a report-specific extractor in the owning service (for recon, the
+ClickHouse aggregations in ``assurance.service``).
 """
 
 from __future__ import annotations
 
-from app.modules.assurance.verdicts.it2 import IT2Trap, Rule, jaccard_it2, nie_tan
+from app.modules.assurance.verdicts.engine import VerdictProfile
+from app.modules.assurance.verdicts.it2 import IT2Trap, Rule
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Profile: recon — AIR pre->post reconciliation
+# ===========================================================================
 # Input vocabulary. Upper trapezoid = generous reading, lower = strict reading;
-# the gap between them (FOU) encodes "the boundary itself is uncertain".
-# Gap scales are % of records/value; traffic is % of daily peak.
-# ---------------------------------------------------------------------------
-VOCAB: dict[str, dict[str, IT2Trap]] = {
+# the gap between them (FOU) encodes "the boundary itself is uncertain". Gap
+# scales are % of records/value; traffic is % of daily peak.
+_RECON_VOCAB: dict[str, dict[str, IT2Trap]] = {
     "count_gap": {
         "negligible": IT2Trap("negligible", (0, 0, 0.3, 1.0), (0, 0, 0.2, 0.6)),
         "small": IT2Trap("small", (0.2, 0.8, 2.0, 4.0), (0.5, 1.0, 1.6, 3.0)),
@@ -54,22 +53,12 @@ VOCAB: dict[str, dict[str, IT2Trap]] = {
     },
 }
 
-# Output codebook on the 0-100 risk scale (CWW words)
-CODEBOOK: dict[str, IT2Trap] = {
-    "Healthy": IT2Trap("Healthy", (0, 0, 10, 30), (0, 0, 6, 20)),
-    "Watch": IT2Trap("Watch", (15, 30, 45, 60), (22, 34, 41, 52)),
-    "Suspect": IT2Trap("Suspect", (45, 60, 72, 85), (52, 63, 69, 78)),
-    "Critical": IT2Trap("Critical", (72, 85, 100, 100), (80, 92, 100, 100)),
-}
-
-# ---------------------------------------------------------------------------
 # Rule base (hand-crafted for MVP). RA-analyst intuition encoded:
 #   - a gap that catches up next hour is latency, not leakage
 #   - the same gap at peak traffic risks more revenue -> escalate
 #   - value gap outranks count gap (revenue is what leaks)
 #   - duplicates are an overbilling/regulatory risk on their own
-# ---------------------------------------------------------------------------
-RULES: list[Rule] = [
+_RECON_RULES: list[Rule] = [
     # clean hours
     Rule({"count_gap": "negligible", "value_gap": "negligible", "dup_rate": "low"}, "Healthy"),
     # small gaps: catch-up decides
@@ -97,43 +86,28 @@ RULES: list[Rule] = [
     Rule({"mismatch": "high"}, "Suspect", 0.9),
 ]
 
-# Fuzzy input keys expected by ``score_row`` (all floats).
-INPUT_KEYS = ("count_gap", "value_gap", "dup_rate", "catchup", "mismatch", "traffic")
+RECON = VerdictProfile(
+    key="recon",
+    label="AIR pre→post reconciliation",
+    inputs=("count_gap", "value_gap", "dup_rate", "catchup", "mismatch", "traffic"),
+    vocab=_RECON_VOCAB,
+    rules=_RECON_RULES,
+)
+
+# ===========================================================================
+# Registry
+# ===========================================================================
+PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON,)}
+
+# Fail at import time if any profile has a rule/vocab/codebook mismatch.
+for _profile in PROFILES.values():
+    _profile.validate()
 
 
-def _decode_word(band: tuple[float, float]) -> tuple[str, float]:
-    """CWW decoder: represent the type-reduced output as a small IT2 set around
-    [band], pick the codebook word with max Jaccard similarity."""
-    lo, hi = band
-    spread = max(hi - lo, 2.0)
-    out = IT2Trap(
-        "output",
-        (max(0, lo - spread * 0.25), lo, hi, min(100, hi + spread * 0.25)),
-        (lo, min(lo + spread * 0.25, hi), max(hi - spread * 0.25, lo), hi),
-    )
-    sims = {w: jaccard_it2(out, cb) for w, cb in CODEBOOK.items()}
-    word = max(sims, key=sims.get)
-    return word, sims[word]
-
-
-def score_row(inputs: dict[str, float]) -> dict:
-    """Classify one hourly discrepancy vector.
-
-    ``inputs`` must supply every key in ``INPUT_KEYS`` (missing -> 0.0). Returns:
-        verdict    : Healthy | Watch | Suspect | Critical
-        score      : 0-100 crisp risk (Nie-Tan)
-        band       : (lo, hi) type-reduced uncertainty interval
-        similarity : Jaccard similarity to the chosen codebook word
-        drivers    : up to 3 top-firing rules (explainability)
-    """
-    fuzzy_inputs = {k: float(inputs.get(k, 0.0)) for k in INPUT_KEYS}
-    tr = nie_tan(RULES, fuzzy_inputs, VOCAB, CODEBOOK)
-    word, sim = _decode_word(tr["interval"])
-    top = sorted(tr["firings"], key=lambda f: -max(f["f"]))[:3]
-    return {
-        "verdict": word,
-        "score": round(tr["score"], 1),
-        "band": (round(tr["interval"][0], 1), round(tr["interval"][1], 1)),
-        "similarity": round(sim, 3),
-        "drivers": top,
-    }
+def get_profile(key: str) -> VerdictProfile:
+    try:
+        return PROFILES[key]
+    except KeyError as exc:
+        raise KeyError(
+            f"Unknown verdict profile {key!r}. Available: {sorted(PROFILES)}"
+        ) from exc

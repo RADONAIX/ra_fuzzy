@@ -14,9 +14,11 @@ from app.core.logging import get_logger
 from app.integrations import clickhouse
 from app.modules.assurance import schemas
 from app.modules.assurance.models import Case, CaseComment, SavedQuery
-from app.modules.assurance.verdicts import score_row
+from app.modules.assurance.verdicts import get_profile, score
 
 log = get_logger("assurance")
+
+_RECON_PROFILE = get_profile("recon")
 
 _AMOUNT_TOL = 0.005  # currency tolerance for amount comparison (matches recon MVP)
 
@@ -259,7 +261,8 @@ async def recon_verdicts(*, stream: str = "air", hours: int = 48) -> list[schema
         mismatch_rate_pct = amt_mismatch / matched * 100 if matched else 0.0
         traffic_pct = raw_count / peak[rt] * 100 if peak.get(rt) else 0.0
 
-        scored = score_row(
+        scored = score(
+            _RECON_PROFILE,
             {
                 "count_gap": count_gap_pct,
                 "value_gap": value_gap_pct,
@@ -267,7 +270,7 @@ async def recon_verdicts(*, stream: str = "air", hours: int = 48) -> list[schema
                 "catchup": catchup_rate_pct,
                 "mismatch": mismatch_rate_pct,
                 "traffic": traffic_pct,
-            }
+            },
         )
         band_lo, band_hi = scored["band"]
         out.append(
