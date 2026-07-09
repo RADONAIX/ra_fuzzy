@@ -15,7 +15,15 @@ import {
   type Verdict,
 } from "@/services";
 
-export const Route = createFileRoute("/reconciliation")({ component: VerdictsPage });
+type VerdictsSearch = { profile?: string };
+
+export const Route = createFileRoute("/reconciliation")({
+  // The selected report is a URL param, set from the sidebar.
+  validateSearch: (search: Record<string, unknown>): VerdictsSearch => ({
+    profile: typeof search.profile === "string" ? search.profile : undefined,
+  }),
+  component: VerdictsPage,
+});
 
 // Four-state verdict palette — distinct in light + dark.
 const VERDICT_META: Record<Verdict, { label: string; badge: string; dot: string; order: number }> = {
@@ -88,9 +96,9 @@ function MetricCard({ title, m, accent }: { readonly title: string; readonly m: 
 
 function VerdictsPage() {
   const t = useT();
+  const { profile: profileParam } = Route.useSearch();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
-  const [profileKey, setProfileKey] = useState<string>("");
   const [hours, setHours] = useState<number>(48);
   const [rows, setRows] = useState<ProfileVerdictRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,12 +114,12 @@ function VerdictsPage() {
   // Load the available report profiles once.
   useEffect(() => {
     if (!authed) return;
-    verdictService.profiles().then((ps) => {
-      setProfiles(ps);
-      if (ps.length && !profileKey) setProfileKey(ps[0].key);
-    });
-  }, [authed]); // eslint-disable-line react-hooks/exhaustive-deps
+    verdictService.profiles().then(setProfiles);
+  }, [authed]);
 
+  // The selected report comes from the URL (?profile=, set from the sidebar);
+  // fall back to the first profile once the list loads.
+  const profileKey = profileParam ?? profiles[0]?.key ?? "";
   const profile = useMemo(
     () => profiles.find((p) => p.key === profileKey),
     [profiles, profileKey],
@@ -189,7 +197,7 @@ function VerdictsPage() {
   return (
     <AppShell>
       <PageHeader
-        title={t("Fuzzy Verdicts")}
+        title={profile ? `${t("Fuzzy Verdicts")} — ${t(profile.label)}` : t("Fuzzy Verdicts")}
         description={t(
           "Hourly Interval Type-2 fuzzy + Computing-With-Words triage per report. Catch-up / lateness is treated as latency, not loss.",
         )}
@@ -223,24 +231,6 @@ function VerdictsPage() {
           </div>
         }
       />
-
-      {/* Report selector */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {profiles.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => setProfileKey(p.key)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition ${
-              p.key === profileKey
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
-            }`}
-          >
-            <ShieldAlert className="h-4 w-4" />
-            {t(p.label)}
-          </button>
-        ))}
-      </div>
 
       {/* Benchmark: fuzzy vs crisp baseline (evidence the fuzzy layer earns its place) */}
       {profile?.hasBenchmark && benchmark && (
