@@ -253,10 +253,129 @@ def _cross_recon_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
     return out
 
 
+# --- file_collection -------------------------------------------------------
+_FC_BASE = {"AIR": 140, "SDP": 90, "MSC": 60}
+_FC_EVENTS: dict[tuple[int, str], dict[str, float]] = {
+    (2, "AIR"): {"received_gap": 18.0, "late_share": 5.0},                    # big miss -> Critical
+    (4, "SDP"): {"received_gap": 6.0, "late_share": 92.0},                    # late batch -> Watch
+    (6, "AIR"): {"load_gap": 3.2},                                            # load failure -> Suspect
+    (9, "MSC"): {"received_gap": 5.0, "late_share": 10.0, "breadth": 70.0},   # moderate + wide -> Suspect
+    (13, "SDP"): {"received_gap": 11.0, "late_share": 6.0},                   # large -> Critical/Suspect
+}
+
+
+def _file_collection_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
+    rng = random.Random(23)
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    hourlist = [now - timedelta(hours=hours - 1 - i) for i in range(hours)]
+    sources = tuple(_FC_BASE)
+    exp_by = {s: [max(5, int(_FC_BASE[s] * _DIURNAL[h.hour]) + rng.randint(-4, 4)) for h in hourlist] for s in sources}
+    peak = {s: max(v) for s, v in exp_by.items()}
+    out: list[tuple[str, datetime, dict, dict]] = []
+    for idx, hour in enumerate(hourlist):
+        ago = hours - 1 - idx
+        for s in sources:
+            expected = exp_by[s][idx]
+            ev = _FC_EVENTS.get((ago, s), {})
+            received_gap = ev.get("received_gap", round(rng.uniform(0, 0.4), 3))
+            late_share = ev.get("late_share", round(rng.uniform(0, 18), 1) if received_gap > 0.5 else 0.0)
+            load_gap = ev.get("load_gap", 0.0)
+            breadth = ev.get("breadth", 0.0)
+            traffic = round(expected / peak[s] * 100, 1) if peak[s] else 0.0
+            gap = round(expected * received_gap / 100)
+            late_ct = round(gap * late_share / 100)
+            missing = max(0, gap - late_ct)
+            received = expected - missing
+            load_fail = round(received * load_gap / 100)
+            metrics = {"received_gap": received_gap, "late_share": late_share,
+                       "load_gap": load_gap, "breadth": breadth, "traffic": traffic}
+            context = {"expected": expected, "received": received, "missing": missing,
+                       "late": late_ct, "loaded": received - load_fail, "load_failed": load_fail}
+            out.append((s, hour, metrics, context))
+    return out
+
+
+# --- record_sequence -------------------------------------------------------
+_RS_BASE = {"NODE-A": 5000, "NODE-B": 3000, "NODE-C": 1500}
+_RS_EVENTS: dict[tuple[int, str], dict[str, float]] = {
+    (2, "NODE-A"): {"gap_rate": 16.0, "max_run": 22.0, "cluster_ratio": 80.0},  # big clustered -> Critical
+    (5, "NODE-B"): {"gap_rate": 5.0, "max_run": 14.0, "cluster_ratio": 85.0},   # clustered moderate -> Suspect
+    (8, "NODE-A"): {"gap_rate": 1.8},                                           # small scattered -> Watch
+    (12, "NODE-C"): {"gap_rate": 6.0, "cluster_ratio": 20.0},                   # scattered moderate -> Suspect
+}
+
+
+def _record_sequence_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
+    rng = random.Random(29)
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    hourlist = [now - timedelta(hours=hours - 1 - i) for i in range(hours)]
+    nodes = tuple(_RS_BASE)
+    exp_by = {n: [max(50, int(_RS_BASE[n] * _DIURNAL[h.hour]) + rng.randint(-30, 30)) for h in hourlist] for n in nodes}
+    peak = {n: max(v) for n, v in exp_by.items()}
+    out: list[tuple[str, datetime, dict, dict]] = []
+    for idx, hour in enumerate(hourlist):
+        ago = hours - 1 - idx
+        for n in nodes:
+            expected = exp_by[n][idx]
+            ev = _RS_EVENTS.get((ago, n), {})
+            gap_rate = ev.get("gap_rate", round(rng.uniform(0, 0.4), 3))
+            max_run = ev.get("max_run", float(rng.randint(0, 2)))
+            cluster_ratio = ev.get("cluster_ratio", round(rng.uniform(0, 30), 1) if gap_rate > 0.5 else 0.0)
+            traffic = round(expected / peak[n] * 100, 1) if peak[n] else 0.0
+            missing = round(expected * gap_rate / 100)
+            clustered = round(missing * cluster_ratio / 100)
+            metrics = {"gap_rate": gap_rate, "max_run": max_run,
+                       "cluster_ratio": cluster_ratio, "traffic": traffic}
+            context = {"expected": expected, "missing": missing,
+                       "max_run": int(max_run), "clustered": clustered}
+            out.append((n, hour, metrics, context))
+    return out
+
+
+# --- processing_exception --------------------------------------------------
+_PE_BASE = {"AIR": 140, "SDP": 90, "MSC": 60}
+_PE_EVENTS: dict[tuple[int, str], dict[str, float]] = {
+    (3, "AIR"): {"exception_rate": 6.0, "retry_cleared": 92.0},   # transient burst -> Watch/Healthy
+    (5, "SDP"): {"reject_rate": 3.2},                             # hard rejects -> Suspect
+    (7, "AIR"): {"exception_rate": 17.0, "retry_cleared": 6.0},   # large low-retry -> Critical
+    (11, "MSC"): {"exception_rate": 5.0, "retry_cleared": 12.0},  # moderate low-retry -> Suspect
+}
+
+
+def _processing_exception_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
+    rng = random.Random(31)
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    hourlist = [now - timedelta(hours=hours - 1 - i) for i in range(hours)]
+    sources = tuple(_PE_BASE)
+    exp_by = {s: [max(5, int(_PE_BASE[s] * _DIURNAL[h.hour]) + rng.randint(-4, 4)) for h in hourlist] for s in sources}
+    peak = {s: max(v) for s, v in exp_by.items()}
+    out: list[tuple[str, datetime, dict, dict]] = []
+    for idx, hour in enumerate(hourlist):
+        ago = hours - 1 - idx
+        for s in sources:
+            expected = exp_by[s][idx]
+            ev = _PE_EVENTS.get((ago, s), {})
+            exception_rate = ev.get("exception_rate", round(rng.uniform(0, 0.4), 3))
+            retry_cleared = ev.get("retry_cleared", round(rng.uniform(0, 20), 1) if exception_rate > 0.5 else 0.0)
+            reject_rate = ev.get("reject_rate", 0.0)
+            traffic = round(expected / peak[s] * 100, 1) if peak[s] else 0.0
+            exc = round(expected * exception_rate / 100)
+            cleared = round(exc * retry_cleared / 100)
+            rejects = round(expected * reject_rate / 100)
+            metrics = {"exception_rate": exception_rate, "retry_cleared": retry_cleared,
+                       "reject_rate": reject_rate, "traffic": traffic}
+            context = {"files": expected, "exceptions": exc, "cleared": cleared, "rejects": rejects}
+            out.append((s, hour, metrics, context))
+    return out
+
+
 _PROFILE_DEMOS = {
     "recon": _recon_profile_demo,
     "file_sequence": _file_sequence_demo,
     "cross_recon": _cross_recon_demo,
+    "file_collection": _file_collection_demo,
+    "record_sequence": _record_sequence_demo,
+    "processing_exception": _processing_exception_demo,
 }
 
 

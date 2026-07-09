@@ -55,7 +55,10 @@ def test_unknown_profile_raises():
 
 
 # --- Benchmark: the fuzzy layer must earn its place vs a crisp threshold -----
-@pytest.mark.parametrize("profile_key", ["recon", "file_sequence", "cross_recon"])
+@pytest.mark.parametrize(
+    "profile_key",
+    ["recon", "file_sequence", "cross_recon", "file_collection", "processing_exception"],
+)
 def test_benchmark_fuzzy_beats_baseline_on_latency(profile_key):
     r = benchmark.evaluate(profile_key)
     assert r is not None

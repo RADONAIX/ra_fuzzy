@@ -15,6 +15,39 @@ from __future__ import annotations
 from app.modules.assurance.verdicts.engine import VerdictProfile
 from app.modules.assurance.verdicts.it2 import IT2Trap, Rule
 
+# ---------------------------------------------------------------------------
+# Reusable linguistic term sets — the same trapezoids recur across reports that
+# share a scale (a % gap, a low/high share, a low/high rare-event rate, etc.).
+# Sharing the dicts keeps profiles concise and their scales consistent.
+# ---------------------------------------------------------------------------
+_PCT_GAP = {  # a percentage gap/rate: negligible → large
+    "negligible": IT2Trap("negligible", (0, 0, 0.3, 1.0), (0, 0, 0.2, 0.6)),
+    "small": IT2Trap("small", (0.2, 0.8, 2.0, 4.0), (0.5, 1.0, 1.6, 3.0)),
+    "moderate": IT2Trap("moderate", (2.0, 4.0, 8.0, 15.0), (3.0, 5.0, 7.0, 12.0)),
+    "large": IT2Trap("large", (8.0, 15.0, 100, 100), (12.0, 20.0, 100, 100)),
+}
+_SHARE = {  # low/high share of something (catch-up / pending / late / retry-cleared)
+    "low": IT2Trap("low", (0, 0, 30, 60), (0, 0, 20, 45)),
+    "high": IT2Trap("high", (40, 70, 100, 100), (55, 85, 100, 100)),
+}
+_RARE = {  # low/high rate for an independent rare risk (dup / mismatch / reject / load)
+    "low": IT2Trap("low", (0, 0, 0.2, 1.0), (0, 0, 0.1, 0.5)),
+    "high": IT2Trap("high", (0.3, 2.0, 100, 100), (1.0, 4.0, 100, 100)),
+}
+_BREADTH = {  # narrow/wide breadth of affected streams
+    "narrow": IT2Trap("narrow", (0, 0, 30, 55), (0, 0, 22, 45)),
+    "wide": IT2Trap("wide", (45, 70, 100, 100), (58, 82, 100, 100)),
+}
+_RUN = {  # length of a consecutive-missing run (counts, not %)
+    "small": IT2Trap("small", (0, 0, 3, 8), (0, 0, 2, 6)),
+    "large": IT2Trap("large", (5, 12, 10000, 10000), (9, 20, 10000, 10000)),
+}
+_TRAFFIC = {  # quiet/normal/peak (% of daily peak)
+    "quiet": IT2Trap("quiet", (0, 0, 15, 35), (0, 0, 10, 25)),
+    "normal": IT2Trap("normal", (15, 35, 60, 80), (25, 42, 55, 70)),
+    "peak": IT2Trap("peak", (60, 80, 100, 100), (70, 90, 100, 100)),
+}
+
 # ===========================================================================
 # Profile: recon — AIR pre->post reconciliation
 # ===========================================================================
@@ -256,6 +289,129 @@ CROSS_RECON = VerdictProfile(
 
 
 # ===========================================================================
+# Profile: file_collection — File Collection & Load (FR-032–037)
+# ===========================================================================
+# Per source collection health. Reuses the latency idea: files that arrived LATE
+# but arrived (late_share) are lateness, not loss. load_gap (received-but-not-
+# loaded) is an independent downstream risk.
+FILE_COLLECTION = VerdictProfile(
+    key="file_collection",
+    label="File Collection & Load",
+    inputs=("received_gap", "late_share", "load_gap", "breadth", "traffic"),
+    vocab={
+        "received_gap": _PCT_GAP,
+        "late_share": _SHARE,
+        "load_gap": _RARE,
+        "breadth": _BREADTH,
+        "traffic": _TRAFFIC,
+    },
+    rules=[
+        Rule({"received_gap": "negligible", "load_gap": "low"}, "Healthy"),
+        Rule({"received_gap": "small", "late_share": "high"}, "Healthy", 0.9),
+        Rule({"received_gap": "small", "late_share": "low", "traffic": "normal"}, "Watch"),
+        Rule({"received_gap": "small", "late_share": "low", "traffic": "peak"}, "Suspect"),
+        Rule({"received_gap": "moderate", "late_share": "high"}, "Watch"),
+        Rule({"received_gap": "moderate", "late_share": "low"}, "Suspect"),
+        Rule({"received_gap": "moderate", "late_share": "low", "traffic": "peak"}, "Critical", 0.8),
+        Rule({"received_gap": "large", "late_share": "high"}, "Suspect"),
+        Rule({"received_gap": "large", "late_share": "low"}, "Critical"),
+        # received but not loaded → downstream load failure, independent risk
+        Rule({"load_gap": "high"}, "Suspect", 0.9),
+        Rule({"load_gap": "high", "traffic": "peak"}, "Critical", 0.7),
+        Rule({"breadth": "wide", "received_gap": "moderate"}, "Suspect", 0.7),
+    ],
+    entity_label="Source",
+    metric_labels={
+        "received_gap": "Received gap %",
+        "late_share": "Late %",
+        "load_gap": "Load gap %",
+        "breadth": "Breadth %",
+        "traffic": "Traffic %",
+    },
+)
+
+
+# ===========================================================================
+# Profile: record_sequence — Missing Record Sequence (FR-044–049)
+# ===========================================================================
+# Per node gap severity. NOTE: a "Moderate" fuzzy fit — a missing record sequence
+# number has no latency/catch-up (it doesn't arrive later), so there is no binary
+# false-alarm advantage over a threshold. The fuzzy value here is SEVERITY
+# grading (a clustered gap is worse than the same count scattered) — which the
+# binary incident benchmark does not measure, so this profile has no benchmark
+# (see roadmap: needs an ordinal/severity benchmark).
+RECORD_SEQUENCE = VerdictProfile(
+    key="record_sequence",
+    label="Missing Record Sequence",
+    inputs=("gap_rate", "max_run", "cluster_ratio", "traffic"),
+    vocab={
+        "gap_rate": _PCT_GAP,
+        "max_run": _RUN,
+        "cluster_ratio": _SHARE,
+        "traffic": _TRAFFIC,
+    },
+    rules=[
+        Rule({"gap_rate": "negligible"}, "Healthy"),
+        Rule({"gap_rate": "small"}, "Watch", 0.8),
+        Rule({"gap_rate": "small", "traffic": "peak"}, "Suspect"),
+        Rule({"gap_rate": "moderate"}, "Suspect"),
+        Rule({"gap_rate": "moderate", "traffic": "peak"}, "Critical", 0.8),
+        Rule({"gap_rate": "large"}, "Critical"),
+        # a long contiguous run is worse than scattered gaps of the same count
+        Rule({"max_run": "large"}, "Suspect", 0.9),
+        Rule({"max_run": "large", "traffic": "peak"}, "Critical", 0.7),
+        Rule({"cluster_ratio": "high", "gap_rate": "moderate"}, "Suspect", 0.7),
+    ],
+    entity_label="Node",
+    metric_labels={
+        "gap_rate": "Gap %",
+        "max_run": "Max run",
+        "cluster_ratio": "Clustered %",
+        "traffic": "Traffic %",
+    },
+)
+
+
+# ===========================================================================
+# Profile: processing_exception — File Processing & Exception (FR-050–055)
+# ===========================================================================
+# Per source processing health. Reuses the latency idea a fourth time: exceptions
+# that CLEARED on retry (retry_cleared) are transient, not permanent loss — they
+# discount the verdict, exactly like catch-up. Hard rejects are the real risk.
+PROCESSING_EXCEPTION = VerdictProfile(
+    key="processing_exception",
+    label="File Processing & Exception",
+    inputs=("exception_rate", "retry_cleared", "reject_rate", "traffic"),
+    vocab={
+        "exception_rate": _PCT_GAP,
+        "retry_cleared": _SHARE,
+        "reject_rate": _RARE,
+        "traffic": _TRAFFIC,
+    },
+    rules=[
+        Rule({"exception_rate": "negligible", "reject_rate": "low"}, "Healthy"),
+        Rule({"exception_rate": "small", "retry_cleared": "high"}, "Healthy", 0.9),
+        Rule({"exception_rate": "small", "retry_cleared": "low"}, "Watch"),
+        Rule({"exception_rate": "moderate", "retry_cleared": "high"}, "Watch"),
+        Rule({"exception_rate": "moderate", "retry_cleared": "low"}, "Suspect"),
+        Rule({"exception_rate": "moderate", "retry_cleared": "low", "traffic": "peak"}, "Critical", 0.8),
+        Rule({"exception_rate": "large", "retry_cleared": "high"}, "Suspect"),
+        Rule({"exception_rate": "large", "retry_cleared": "low"}, "Critical"),
+        # hard rejections (not retryable) — permanent processing loss
+        Rule({"reject_rate": "high"}, "Suspect", 0.9),
+        Rule({"reject_rate": "high", "traffic": "peak"}, "Critical", 0.7),
+    ],
+    entity_label="Source",
+    metric_labels={
+        "exception_rate": "Exception %",
+        "retry_cleared": "Retry-cleared %",
+        "reject_rate": "Reject %",
+        "traffic": "Traffic %",
+    },
+)
+
+
+# ===========================================================================
 # Profile: overview — platform health roll-up (FR-060)
 # ===========================================================================
 # A META profile: its inputs are NOT read from a data source but AGGREGATED from
@@ -320,7 +476,16 @@ OVERVIEW = VerdictProfile(
 # Registry
 # ===========================================================================
 PROFILES: dict[str, VerdictProfile] = {
-    p.key: p for p in (RECON, FILE_SEQUENCE, CROSS_RECON, OVERVIEW)
+    p.key: p
+    for p in (
+        RECON,
+        FILE_SEQUENCE,
+        CROSS_RECON,
+        FILE_COLLECTION,
+        RECORD_SEQUENCE,
+        PROCESSING_EXCEPTION,
+        OVERVIEW,
+    )
 }
 
 # Fail at import time if any profile has a rule/vocab/codebook mismatch.

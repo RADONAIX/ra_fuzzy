@@ -129,10 +129,70 @@ def _cross_baseline(m: dict) -> str:
     return "Healthy"
 
 
+def _filecoll_scenarios(rng: random.Random):
+    return [
+        ("clean", False, False, lambda: {
+            "received_gap": rng.uniform(0, 0.4), "late_share": 0.0,
+            "load_gap": 0.0, "breadth": 0.0, "traffic": rng.uniform(10, 100)}),
+        # a batch that arrived LATE but arrived -> lateness, not loss
+        ("late_batch", False, True, lambda: {
+            "received_gap": rng.uniform(3, 7), "late_share": rng.uniform(85, 100),
+            "load_gap": 0.0, "breadth": 0.0, "traffic": rng.uniform(40, 100)}),
+        ("moderate_miss", True, False, lambda: {
+            "received_gap": rng.uniform(4, 8), "late_share": rng.uniform(0, 15),
+            "load_gap": 0.0, "breadth": 0.0, "traffic": rng.uniform(30, 100)}),
+        ("big_miss", True, False, lambda: {
+            "received_gap": rng.uniform(12, 25), "late_share": rng.uniform(0, 8),
+            "load_gap": 0.0, "breadth": 0.0, "traffic": rng.uniform(50, 100)}),
+        ("load_fail", True, False, lambda: {
+            "received_gap": rng.uniform(0, 0.4), "late_share": 0.0,
+            "load_gap": rng.uniform(2, 5), "breadth": 0.0, "traffic": rng.uniform(40, 100)}),
+    ]
+
+
+def _filecoll_baseline(m: dict) -> str:
+    if m["received_gap"] >= 8:
+        return "Critical"
+    if m["received_gap"] >= 1.5 or m["load_gap"] >= 1.5:
+        return "Suspect"
+    return "Healthy"
+
+
+def _procexc_scenarios(rng: random.Random):
+    return [
+        ("clean", False, False, lambda: {
+            "exception_rate": rng.uniform(0, 0.4), "retry_cleared": 0.0,
+            "reject_rate": 0.0, "traffic": rng.uniform(10, 100)}),
+        # exceptions that CLEARED on retry -> transient, not loss
+        ("transient", False, True, lambda: {
+            "exception_rate": rng.uniform(3, 7), "retry_cleared": rng.uniform(85, 100),
+            "reject_rate": 0.0, "traffic": rng.uniform(40, 100)}),
+        ("moderate_exc", True, False, lambda: {
+            "exception_rate": rng.uniform(4, 8), "retry_cleared": rng.uniform(0, 15),
+            "reject_rate": 0.0, "traffic": rng.uniform(30, 100)}),
+        ("large_exc", True, False, lambda: {
+            "exception_rate": rng.uniform(10, 20), "retry_cleared": rng.uniform(0, 8),
+            "reject_rate": 0.0, "traffic": rng.uniform(50, 100)}),
+        ("rejects", True, False, lambda: {
+            "exception_rate": rng.uniform(0, 0.4), "retry_cleared": 0.0,
+            "reject_rate": rng.uniform(2, 5), "traffic": rng.uniform(40, 100)}),
+    ]
+
+
+def _procexc_baseline(m: dict) -> str:
+    if m["exception_rate"] >= 8:
+        return "Critical"
+    if m["exception_rate"] >= 1.5 or m["reject_rate"] >= 1.5:
+        return "Suspect"
+    return "Healthy"
+
+
 _HARNESS = {
     "recon": (_recon_scenarios, _recon_baseline),
     "file_sequence": (_fileseq_scenarios, _fileseq_baseline),
     "cross_recon": (_cross_scenarios, _cross_baseline),
+    "file_collection": (_filecoll_scenarios, _filecoll_baseline),
+    "processing_exception": (_procexc_scenarios, _procexc_baseline),
 }
 
 
