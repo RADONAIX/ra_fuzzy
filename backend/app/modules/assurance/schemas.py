@@ -116,6 +116,43 @@ class BenchmarkReport(BaseModel):
     latencyFalseAlarms: LatencyFalseAlarms
 
 
+# --- Dashboard summary (roll-up across every report) -----------------------
+class ReportHealth(BaseModel):
+    profile: str
+    label: str
+    entityLabel: str
+    counts: dict[str, int]  # {Healthy, Watch, Suspect, Critical}
+    worstVerdict: Verdict  # worst verdict in the window
+    worstScore: float
+    worstEntity: str
+    worstHour: datetime
+
+
+class AttentionItem(BaseModel):
+    profile: str
+    label: str
+    entity: str
+    hour: datetime
+    verdict: Verdict
+    score: float
+    bandLo: float
+    bandHi: float
+
+
+class DashboardSummary(BaseModel):
+    hours: int
+    bucketsMonitored: int
+    counts: dict[str, int]  # totals across all leaf reports
+    flaggedPct: float  # % of buckets Watch or worse
+    # Current (latest hour) platform-health verdict from the overview roll-up
+    platformVerdict: Verdict
+    platformScore: float
+    platformBandLo: float
+    platformBandHi: float
+    reports: list[ReportHealth]
+    attention: list[AttentionItem]  # worst Suspect+ items, most severe first
+
+
 class ProfileVerdictRow(BaseModel):
     profile: str
     entity: str  # record type / source / event-type, per the report

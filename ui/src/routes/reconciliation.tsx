@@ -5,6 +5,7 @@ import { ShieldAlert, RefreshCw, ChevronDown, ChevronRight, Activity, Gauge } fr
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Tooltip } from "@/components/ui-kit/Tooltip";
+import { VERDICT_META, VERDICT_ORDER, VerdictBadge } from "@/components/ui-kit/verdict";
 import { useT } from "@/lib/i18n";
 import {
   verdictService,
@@ -25,46 +26,7 @@ export const Route = createFileRoute("/reconciliation")({
   component: VerdictsPage,
 });
 
-// Four-state verdict palette — distinct in light + dark.
-const VERDICT_META: Record<Verdict, { label: string; badge: string; dot: string; order: number }> = {
-  Healthy: {
-    label: "Healthy",
-    badge: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900",
-    dot: "bg-emerald-500",
-    order: 0,
-  },
-  Watch: {
-    label: "Watch",
-    badge: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900",
-    dot: "bg-amber-500",
-    order: 1,
-  },
-  Suspect: {
-    label: "Suspect",
-    badge: "bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:ring-orange-900",
-    dot: "bg-orange-500",
-    order: 2,
-  },
-  Critical: {
-    label: "Critical",
-    badge: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900",
-    dot: "bg-red-500",
-    order: 3,
-  },
-};
-
-const VERDICT_ORDER: Verdict[] = ["Healthy", "Watch", "Suspect", "Critical"];
 const HOUR_WINDOWS = [24, 48, 168] as const;
-
-function VerdictBadge({ verdict }: { readonly verdict: Verdict }) {
-  const m = VERDICT_META[verdict];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${m.badge}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />
-      {m.label}
-    </span>
-  );
-}
 
 // Header carries the unit (e.g. "Count gap %"), so the cell shows the number.
 function fmtMetric(label: string, v: number) {

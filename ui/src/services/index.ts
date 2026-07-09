@@ -200,6 +200,42 @@ export interface ProfileVerdictRow {
   drivers: VerdictDriver[];
 }
 
+// --- Dashboard summary (roll-up across every report) -----------------------
+export interface ReportHealth {
+  profile: string;
+  label: string;
+  entityLabel: string;
+  counts: Record<string, number>;
+  worstVerdict: Verdict;
+  worstScore: number;
+  worstEntity: string;
+  worstHour: string;
+}
+
+export interface AttentionItem {
+  profile: string;
+  label: string;
+  entity: string;
+  hour: string;
+  verdict: Verdict;
+  score: number;
+  bandLo: number;
+  bandHi: number;
+}
+
+export interface DashboardSummary {
+  hours: number;
+  bucketsMonitored: number;
+  counts: Record<string, number>;
+  flaggedPct: number;
+  platformVerdict: Verdict;
+  platformScore: number;
+  platformBandLo: number;
+  platformBandHi: number;
+  reports: ReportHealth[];
+  attention: AttentionItem[];
+}
+
 export const verdictService = {
   profiles: () => safeGet<ProfileInfo[]>(`/verdicts/profiles`, []),
   list: (profile: string, hours = 48) =>
@@ -207,4 +243,5 @@ export const verdictService = {
   // null when the profile has no benchmark (e.g. the overview roll-up → 404).
   benchmark: (profile: string) =>
     safeGet<BenchmarkReport | null>(`/verdicts/benchmark?profile=${profile}`, null),
+  summary: (hours = 48) => safeGet<DashboardSummary | null>(`/verdicts/summary?hours=${hours}`, null),
 };

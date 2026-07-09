@@ -62,6 +62,16 @@ async def profile_verdicts(
     return await service.profile_verdicts(profile=profile, hours=hours)
 
 
+@verdicts_router.get("/summary", response_model=schemas.DashboardSummary)
+async def verdict_summary(
+    hours: int = Query(default=48, ge=1, le=720),
+    _: Principal = Depends(require(PermKey.DASHBOARD, "view")),
+) -> schemas.DashboardSummary:
+    """Dashboard roll-up across every report: KPI totals, % flagged, current
+    platform health, per-report health, and the worst items needing attention."""
+    return await service.verdict_summary(hours=hours)
+
+
 @verdicts_router.get("/benchmark", response_model=schemas.BenchmarkReport)
 async def verdict_benchmark(
     profile: str = Query(default="recon"),

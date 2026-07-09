@@ -445,6 +445,68 @@ async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[s
     return []
 
 
+_VERDICT_ORDER = ("Healthy", "Watch", "Suspect", "Critical")
+
+
+async def verdict_summary(*, hours: int = 48) -> schemas.DashboardSummary:
+    """Roll every leaf report up into one dashboard: totals, % flagged, current
+    platform health, per-report health, and the worst items needing attention."""
+    counts = {v: 0 for v in _VERDICT_ORDER}
+    buckets = 0
+    reports: list[schemas.ReportHealth] = []
+    attention: list[schemas.AttentionItem] = []
+
+    for key, prof in PROFILES.items():
+        if key == "overview":
+            continue
+        rows = await profile_verdicts(profile=key, hours=hours)
+        if not rows:
+            continue
+        rc = {v: 0 for v in _VERDICT_ORDER}
+        for r in rows:
+            rc[r.verdict] = rc.get(r.verdict, 0) + 1
+            if r.verdict in ("Suspect", "Critical"):
+                attention.append(
+                    schemas.AttentionItem(
+                        profile=key, label=prof.label, entity=r.entity, hour=r.hour,
+                        verdict=r.verdict, score=r.score, bandLo=r.bandLo, bandHi=r.bandHi,
+                    )
+                )
+        for v in _VERDICT_ORDER:
+            counts[v] += rc[v]
+        buckets += len(rows)
+        worst = max(rows, key=lambda r: r.score)
+        reports.append(
+            schemas.ReportHealth(
+                profile=key, label=prof.label, entityLabel=prof.entity_label, counts=rc,
+                worstVerdict=worst.verdict, worstScore=worst.score,
+                worstEntity=worst.entity, worstHour=worst.hour,
+            )
+        )
+
+    flagged = counts["Watch"] + counts["Suspect"] + counts["Critical"]
+    flagged_pct = round(flagged / buckets * 100, 1) if buckets else 0.0
+
+    # Current platform health = the latest-hour PLATFORM row of the roll-up.
+    overview_rows = await profile_verdicts(profile="overview", hours=hours)
+    platform = [r for r in overview_rows if r.entity == "PLATFORM"]
+    cur = max(platform, key=lambda r: r.hour) if platform else None
+
+    attention.sort(key=lambda a: -a.score)
+    return schemas.DashboardSummary(
+        hours=hours,
+        bucketsMonitored=buckets,
+        counts=counts,
+        flaggedPct=flagged_pct,
+        platformVerdict=cur.verdict if cur else "Healthy",
+        platformScore=cur.score if cur else 0.0,
+        platformBandLo=cur.bandLo if cur else 0.0,
+        platformBandHi=cur.bandHi if cur else 0.0,
+        reports=reports,
+        attention=attention[:12],
+    )
+
+
 # --- Cases -----------------------------------------------------------------
 async def _next_case_reference(db: AsyncSession) -> str:
     count = (await db.execute(select(func.count(Case.id)))).scalar_one()
