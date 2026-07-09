@@ -93,9 +93,46 @@ def _fileseq_baseline(m: dict) -> str:
     return "Healthy"
 
 
+def _cross_scenarios(rng: random.Random):
+    return [
+        ("clean", False, False, lambda: {
+            "missing_rate": rng.uniform(0, 0.4), "pending_share": 0.0,
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(10, 100)}),
+        # divergence still in-flight -> will reconcile, not a true miss
+        ("pending_batch", False, True, lambda: {
+            "missing_rate": rng.uniform(3, 7), "pending_share": rng.uniform(85, 100),
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(40, 100)}),
+        ("small_divergence", True, False, lambda: {
+            "missing_rate": rng.uniform(1.5, 3), "pending_share": rng.uniform(0, 12),
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(40, 100)}),
+        ("moderate_missing", True, False, lambda: {
+            "missing_rate": rng.uniform(4, 8), "pending_share": rng.uniform(0, 15),
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(30, 100)}),
+        ("large_missing", True, False, lambda: {
+            "missing_rate": rng.uniform(12, 25), "pending_share": rng.uniform(0, 8),
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(50, 100)}),
+        ("field_drift", True, False, lambda: {
+            "missing_rate": rng.uniform(0, 0.4), "pending_share": 0.0,
+            "unexpected_rate": 0.0, "field_drift": rng.uniform(2, 6), "traffic": rng.uniform(40, 100)}),
+        ("ghosts", True, False, lambda: {
+            "missing_rate": 0.0, "pending_share": 0.0,
+            "unexpected_rate": rng.uniform(2, 5), "field_drift": rng.uniform(0, 0.3), "traffic": rng.uniform(40, 100)}),
+    ]
+
+
+def _cross_baseline(m: dict) -> str:
+    """Crisp threshold, latency (pending) UNAWARE."""
+    if m["missing_rate"] >= 8 or m["field_drift"] >= 8:
+        return "Critical"
+    if m["missing_rate"] >= 1.5 or m["field_drift"] >= 1.5 or m["unexpected_rate"] >= 1.5:
+        return "Suspect"
+    return "Healthy"
+
+
 _HARNESS = {
     "recon": (_recon_scenarios, _recon_baseline),
     "file_sequence": (_fileseq_scenarios, _fileseq_baseline),
+    "cross_recon": (_cross_scenarios, _cross_baseline),
 }
 
 

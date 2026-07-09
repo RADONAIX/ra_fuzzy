@@ -181,6 +181,81 @@ FILE_SEQUENCE = VerdictProfile(
 
 
 # ===========================================================================
+# Profile: cross_recon — AIR↔SDP cross-reconciliation (FR-059)
+# ===========================================================================
+# Per event-type "agreement confidence". Cross-source events don't map 1:1 and
+# fields carry tolerances, so this is inherently the fuzziest report. It reuses
+# the latency idea a third time: a divergence still in-flight (pending) will
+# reconcile — it is not (yet) a true miss.
+_CROSS_VOCAB: dict[str, dict[str, IT2Trap]] = {
+    # % of events on one side with no counterpart on the other (true divergence)
+    "missing_rate": {
+        "negligible": IT2Trap("negligible", (0, 0, 0.3, 1.0), (0, 0, 0.2, 0.6)),
+        "small": IT2Trap("small", (0.2, 0.8, 2.0, 4.0), (0.5, 1.0, 1.6, 3.0)),
+        "moderate": IT2Trap("moderate", (2.0, 4.0, 8.0, 15.0), (3.0, 5.0, 7.0, 12.0)),
+        "large": IT2Trap("large", (8.0, 15.0, 100, 100), (12.0, 20.0, 100, 100)),
+    },
+    # % of that divergence still in-flight (will reconcile) — the catch-up analog
+    "pending_share": {
+        "low": IT2Trap("low", (0, 0, 30, 60), (0, 0, 20, 45)),
+        "high": IT2Trap("high", (40, 70, 100, 100), (55, 85, 100, 100)),
+    },
+    # % of ghost records: present on one side, never expected on the other
+    "unexpected_rate": {
+        "low": IT2Trap("low", (0, 0, 0.2, 1.0), (0, 0, 0.1, 0.5)),
+        "high": IT2Trap("high", (0.3, 2.0, 100, 100), (1.0, 4.0, 100, 100)),
+    },
+    # % of matched pairs whose fields disagree beyond tolerance (amount/attr drift)
+    "field_drift": {
+        "low": IT2Trap("low", (0, 0, 0.5, 2.0), (0, 0, 0.3, 1.2)),
+        "moderate": IT2Trap("moderate", (1.0, 3.0, 8.0, 15.0), (2.0, 4.0, 7.0, 12.0)),
+        "high": IT2Trap("high", (8.0, 15.0, 100, 100), (12.0, 20.0, 100, 100)),
+    },
+    "traffic": {
+        "quiet": IT2Trap("quiet", (0, 0, 15, 35), (0, 0, 10, 25)),
+        "normal": IT2Trap("normal", (15, 35, 60, 80), (25, 42, 55, 70)),
+        "peak": IT2Trap("peak", (60, 80, 100, 100), (70, 90, 100, 100)),
+    },
+}
+
+_CROSS_RULES: list[Rule] = [
+    Rule({"missing_rate": "negligible", "unexpected_rate": "low", "field_drift": "low"}, "Healthy"),
+    # small divergence: pending-share decides (in-flight = will reconcile)
+    Rule({"missing_rate": "small", "pending_share": "high"}, "Healthy", 0.9),
+    Rule({"missing_rate": "small", "pending_share": "low", "traffic": "normal"}, "Watch"),
+    Rule({"missing_rate": "small", "pending_share": "low", "traffic": "peak"}, "Suspect"),
+    # moderate / large divergence
+    Rule({"missing_rate": "moderate", "pending_share": "high"}, "Watch"),
+    Rule({"missing_rate": "moderate", "pending_share": "low"}, "Suspect"),
+    Rule({"missing_rate": "moderate", "pending_share": "low", "traffic": "peak"}, "Critical", 0.8),
+    Rule({"missing_rate": "large", "pending_share": "high"}, "Suspect"),
+    Rule({"missing_rate": "large", "pending_share": "low"}, "Critical"),
+    # field drift — values disagree across systems (direct revenue integrity risk)
+    Rule({"field_drift": "moderate"}, "Suspect", 0.9),
+    Rule({"field_drift": "high"}, "Critical", 0.8),
+    # ghosts / unexpected records on one side
+    Rule({"unexpected_rate": "high"}, "Suspect", 0.9),
+    Rule({"unexpected_rate": "high", "traffic": "peak"}, "Critical", 0.7),
+]
+
+CROSS_RECON = VerdictProfile(
+    key="cross_recon",
+    label="AIR↔SDP cross-reconciliation",
+    inputs=("missing_rate", "pending_share", "unexpected_rate", "field_drift", "traffic"),
+    vocab=_CROSS_VOCAB,
+    rules=_CROSS_RULES,
+    entity_label="Event type",
+    metric_labels={
+        "missing_rate": "Missing %",
+        "pending_share": "Pending %",
+        "unexpected_rate": "Unexpected %",
+        "field_drift": "Field drift %",
+        "traffic": "Traffic %",
+    },
+)
+
+
+# ===========================================================================
 # Profile: overview — platform health roll-up (FR-060)
 # ===========================================================================
 # A META profile: its inputs are NOT read from a data source but AGGREGATED from
@@ -244,7 +319,9 @@ OVERVIEW = VerdictProfile(
 # ===========================================================================
 # Registry
 # ===========================================================================
-PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON, FILE_SEQUENCE, OVERVIEW)}
+PROFILES: dict[str, VerdictProfile] = {
+    p.key: p for p in (RECON, FILE_SEQUENCE, CROSS_RECON, OVERVIEW)
+}
 
 # Fail at import time if any profile has a rule/vocab/codebook mismatch.
 for _profile in PROFILES.values():

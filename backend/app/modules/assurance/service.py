@@ -374,13 +374,18 @@ def _generic_row(prof, entity: str, hour, metrics: dict, context: dict) -> schem
 
 # The overview roll-up (FR-060) is a META profile: its inputs are aggregated
 # from the other profiles' verdicts rather than read from a data source.
-_OVERVIEW_CHILDREN = ("recon", "file_sequence")
+_OVERVIEW_CHILDREN = ("recon", "file_sequence", "cross_recon")
 
 
 def _child_scope(profile_key: str, entity: str) -> str:
     # recon is AIR-only (REFILL/ADJUSTMENT record types); file_sequence's entity
-    # IS the source (AIR/SDP).
-    return "AIR" if profile_key == "recon" else entity
+    # IS the source (AIR/SDP); cross_recon spans both sides, so it rolls up only
+    # at the platform level.
+    if profile_key == "recon":
+        return "AIR"
+    if profile_key == "cross_recon":
+        return "PLATFORM"
+    return entity
 
 
 def _overview_vectors(hours: int) -> list[tuple[str, object, dict, dict]]:
@@ -392,7 +397,7 @@ def _overview_vectors(hours: int) -> list[tuple[str, object, dict, dict]]:
         for entity, hour, metrics, _ctx in generate_profile_demo(key, hours):
             v = score(prof, metrics)
             item = {"report": key, "verdict": v["verdict"], "score": v["score"]}
-            for scope in (_child_scope(key, entity), "PLATFORM"):
+            for scope in {_child_scope(key, entity), "PLATFORM"}:
                 groups.setdefault((scope, hour), []).append(item)
 
     out: list[tuple[str, object, dict, dict]] = []

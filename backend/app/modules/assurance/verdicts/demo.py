@@ -190,9 +190,73 @@ def _file_sequence_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
     return out
 
 
+# Cross-recon events, keyed by (hours_ago, event_type). Override crisp metrics.
+_CROSS_BASE = {"RECHARGE": 900, "ADJUSTMENT": 350, "USAGE": 1400}  # peak events/hour
+_CROSS_EVENTS: dict[tuple[int, str], dict[str, float]] = {
+    (2, "RECHARGE"): {"field_drift": 12.0},                              # value drift -> Critical
+    (4, "USAGE"): {"missing_rate": 6.0, "pending_share": 92.0},          # in-flight batch -> Watch/Healthy
+    (6, "ADJUSTMENT"): {"unexpected_rate": 3.2},                         # ghost records -> Suspect
+    (8, "USAGE"): {"missing_rate": 5.0, "pending_share": 10.0},          # real divergence -> Suspect
+    (11, "RECHARGE"): {"missing_rate": 18.0, "pending_share": 6.0},      # large divergence -> Critical
+    (16, "ADJUSTMENT"): {"field_drift": 4.0},                            # moderate field drift -> Suspect
+}
+
+
+def _cross_recon_demo(hours: int) -> list[tuple[str, datetime, dict, dict]]:
+    rng = random.Random(11)
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    hourlist = [now - timedelta(hours=hours - 1 - i) for i in range(hours)]
+    etypes = tuple(_CROSS_BASE)
+
+    expected_by: dict[str, list[int]] = {e: [] for e in etypes}
+    for hour in hourlist:
+        d = _DIURNAL[hour.hour]
+        for e in etypes:
+            expected_by[e].append(max(10, int(_CROSS_BASE[e] * d) + rng.randint(-20, 20)))
+    peak = {e: max(v) for e, v in expected_by.items()}
+
+    out: list[tuple[str, datetime, dict, dict]] = []
+    for idx, hour in enumerate(hourlist):
+        hours_ago = hours - 1 - idx
+        for e in etypes:
+            expected = expected_by[e][idx]
+            ev = _CROSS_EVENTS.get((hours_ago, e), {})
+            missing_rate = ev.get("missing_rate", round(rng.uniform(0.0, 0.4), 3))
+            pending_share = ev.get("pending_share", round(rng.uniform(0.0, 20.0), 1) if missing_rate > 0.5 else 0.0)
+            unexpected_rate = ev.get("unexpected_rate", 0.0)
+            field_drift = ev.get("field_drift", round(rng.uniform(0.0, 0.3), 3))
+            traffic_pct = round(expected / peak[e] * 100, 1) if peak[e] else 0.0
+
+            div = round(expected * missing_rate / 100)
+            pending_ct = round(div * pending_share / 100)
+            missing_ct = max(0, div - pending_ct)
+            matched = expected - missing_ct
+            unexpected_ct = round(matched * unexpected_rate / 100)
+            drift_ct = round(matched * field_drift / 100)
+
+            metrics = {
+                "missing_rate": missing_rate,
+                "pending_share": pending_share,
+                "unexpected_rate": unexpected_rate,
+                "field_drift": field_drift,
+                "traffic": traffic_pct,
+            }
+            context = {
+                "air_events": expected,
+                "matched": matched,
+                "missing": missing_ct,
+                "pending": pending_ct,
+                "unexpected": unexpected_ct,
+                "field_mismatch": drift_ct,
+            }
+            out.append((e, hour, metrics, context))
+    return out
+
+
 _PROFILE_DEMOS = {
     "recon": _recon_profile_demo,
     "file_sequence": _file_sequence_demo,
+    "cross_recon": _cross_recon_demo,
 }
 
 
