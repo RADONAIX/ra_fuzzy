@@ -1,93 +1,94 @@
-# RADONaix — RA Reconciliation
+# RADONaix — Fuzzy Revenue-Assurance Verdicts
 
-Hourly **revenue-assurance reconciliation** for an Ericsson **AIR** feed. It
-compares the network side (raw, pre-mediation) against the mediation side
-(processed, post-mediation) and classifies each hour with an **Interval Type-2
-(IT2) fuzzy + Computing-With-Words** engine, producing a plain verdict:
-`Healthy / Watch / Suspect / Critical`.
+A **profile-driven Interval Type-2 (IT2) fuzzy + Computing-With-Words (CWW)**
+verdict layer for telecom revenue assurance. Each RA report's hourly discrepancy
+metrics are classified into a plain verdict — `Healthy / Watch / Suspect /
+Critical` — with an uncertainty band and an IF/THEN rule trace, on top of the
+existing RADONaix platform.
 
-Two layers, strictly separated:
+The core idea: **don't fuzzify the counting — fuzzify the verdict.** A
+deterministic layer produces crisp metrics; the fuzzy layer turns them into a
+context-aware triage verdict. The recurring insight it captures is *latency ≠
+loss*: a gap that catches up (late file, delayed batch, in-flight cross-event,
+retry-cleared exception) is discounted, where a crisp threshold would false-alarm.
 
-- **Layer 1 (`recon/`)** — deterministic, exact, auditable. Produces the
-  per-`(record_type, hour)` discrepancy vector. No fuzziness.
-- **Layer 2 (`fuzzy/`)** — the IT2 + CWW verdict engine. Consumes Layer 1's
-  vector, never touches raw records.
+## Reports (verdict profiles)
 
-> See [CLAUDE.md](CLAUDE.md) for the full design rationale, confirmed data
-> decisions, and known quirks. Read it before changing engine code.
+One shared engine, seven pluggable profiles — adding a report is a profile
+(vocabulary + rule base) + a data extractor, with no engine or UI changes:
 
-## Repository layout
+| Profile | Report | Benchmark |
+|---|---|---|
+| `recon` | AIR pre→post reconciliation | ✅ |
+| `file_sequence` | Missing File Sequence (FR-038–043) | ✅ |
+| `cross_recon` | AIR↔SDP cross-reconciliation (FR-059) | ✅ |
+| `file_collection` | File Collection & Load (FR-032–037) | ✅ |
+| `processing_exception` | File Processing & Exception (FR-050–055) | ✅ |
+| `record_sequence` | Missing Record Sequence (FR-044–049) | — (severity, not incident) |
+| `overview` | Platform health roll-up (FR-060) | — (meta) |
+
+A **benchmark harness** scores each benchmarked profile against a crisp
+threshold baseline on a labelled set (precision/recall/F1 + catch-up false
+alarms) — evidence the fuzzy layer earns its place rather than being trusted.
+
+## Layout
 
 ```
-recon_fuzzy/                      ← repo root
-├── CLAUDE.md                     design doc / decisions (read first)
-├── README.md                     this file
-├── radonaix_recon_dashboard.jsx  built dashboard (React)
-└── radonaix-recon-mvp/           the Python backend
-    ├── recon/       Layer 1  — normalize + reconcile
-    ├── fuzzy/       Layer 2  — IT2 core + CWW verdict engine
-    ├── demo/        scenario injector, pipeline runner, dashboard template
-    ├── data/        source CSV extracts (git-ignored, not committed)
-    ├── out/         generated verdicts / logs (git-ignored)
-    ├── requirements.txt
-    ├── requirements-dev.txt
-    └── Makefile
+recon_fuzzy/                       ← repo root
+├── CLAUDE.md                      design rationale + confirmed data decisions
+├── backend/                       FastAPI modular monolith (the RADONaix API)
+│   └── app/modules/assurance/verdicts/
+│       ├── engine.py              report-agnostic: VerdictProfile + score()
+│       ├── profiles.py            the 7 profiles (vocab + rules) + registry
+│       ├── it2.py                 IT2 core: trapezoids, Nie-Tan, Jaccard
+│       ├── demo.py                synthetic timelines (demo mode)
+│       └── benchmark.py           fuzzy-vs-baseline labelled harness
+└── ui/                            React (TanStack Start) — the "Fuzzy Verdicts" screen
 ```
 
-## Prerequisites
+The verdict endpoints live in `backend/app/modules/assurance/` (`router.py`,
+`service.py`, `schemas.py`): `GET /api/verdicts/profiles`,
+`GET /api/verdicts?profile=&hours=`, `GET /api/verdicts/benchmark?profile=`.
 
-- Python 3.9+ (3.11+ recommended for production)
-- The four AIR CSV extracts (raw refill, raw adjustment, processed RR,
-  processed AA)
+## Run locally (no Docker, fully isolated)
 
-## Setup
-
-All commands run from `radonaix-recon-mvp/`.
+The backend reads its own dev config from `backend/.env` (git-ignored). It runs
+against a **throwaway local Postgres on port 5433** and, with
+`VERDICTS_DEMO_MODE=true`, serves synthetic verdict data — so it never touches
+any real ra-platform data store (ClickHouse / ra_pg are disabled).
 
 ```bash
-cd radonaix-recon-mvp
+# --- backend ---
+cd backend
+make install                                   # uv venv + deps (Python 3.11+)
+pg_ctl -D .localdb -o "-p 5433 -k /tmp" -l .localdb/server.log start   # first run: initdb -D .localdb --auth-host=trust
+alembic upgrade head                           # migrate the isolated DB
+python -m app.seed                             # seed roles + admin user
+./.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010
 
-# 1) create the venv and install dependencies
-make setup            # or: python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-
-# 2) provide the source data — the loader expects the 4 CSVs in data/
-mkdir -p data
-# copy or symlink the extracts into data/ using their original filenames, e.g.:
-#   ln -s /path/to/refill_record_*_refill_rec_raw.csv          data/
-#   ln -s /path/to/adjustment_record_*_adj_rec_raw.csv         data/
-#   ln -s /path/to/air_processed_rr_*_processed_rr.csv         data/
-#   ln -s /path/to/air_processed_aa_*_processed_aa.csv         data/
+# --- ui (separate terminal) ---
+cd ui
+bun install
+bun run dev                                    # → http://localhost:8080
 ```
 
-The exact filenames the loader looks for are listed in
-[recon/normalize.py](radonaix-recon-mvp/recon/normalize.py) (`load_all`).
+Open **http://localhost:8080**, sign in (`admin@radonaix.io` / `ChangeMe!123`),
+and use the **Fuzzy Verdicts** screen — pick a report, toggle 24h/48h/7d, expand
+a row for its rule trace, and read the fuzzy-vs-baseline panel.
 
-## Run
+> `pip install -r backend/requirements.txt` also works in a **Python 3.11+**
+> venv (the pins require 3.11+).
+
+## Test
 
 ```bash
-make run              # or: ./.venv/bin/python demo/run_demo.py
+cd backend && .venv/bin/python -m pytest tests/test_verdicts.py -q
 ```
 
-This normalizes the real records, replays them across a simulated 48-hour
-timeline with injected scenarios (clean / late-file / leakage / duplicates /
-amount-corruption), reconciles hourly, and computes verdicts.
+## Real data
 
-Outputs land in `out/`:
-
-- `hourly_verdicts.csv` — discrepancy vector + verdict/score/drivers per hour
-- `injection_log.csv` — ground truth of injected scenarios (to validate against)
-
-## Dashboard
-
-`demo/dashboard_template.jsx` is a React component with a `__DATA__` placeholder.
-The build step that writes `out/dashboard_data.json` and substitutes it into the
-template is **not yet wired into the pipeline** — see the next-steps section in
-[CLAUDE.md](CLAUDE.md). The full UI is planned.
-
-## Development
-
-```bash
-make setup-dev        # installs pytest + ruff
-make lint             # ruff check
-make clean            # remove generated outputs and caches
+Everything above runs in **demo mode**. To score live `rafms` data, set the
+ClickHouse env vars and `VERDICTS_DEMO_MODE=false`; the recon profile reads the
+source unions, and each report's real extractor is wired as its source tables
+come online. See [CLAUDE.md](CLAUDE.md) for the confirmed data mappings.
 ```

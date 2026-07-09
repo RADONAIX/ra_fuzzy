@@ -1,6 +1,14 @@
-# CLAUDE.md — RADONaix RA Reconciliation MVP
+# CLAUDE.md — RADONaix Fuzzy RA Verdicts
 
 Context for AI-assisted development. Read this before touching code.
+
+> **Status:** the original standalone MVP has been ported into the platform. The
+> IT2+CWW engine is now a report-agnostic **verdict framework** in
+> `backend/app/modules/assurance/verdicts/` with seven pluggable profiles
+> (`recon`, `file_sequence`, `cross_recon`, `file_collection`,
+> `processing_exception`, `record_sequence`, `overview`), a demo mode, and a
+> benchmark harness. The recon data decisions below remain the ground truth for
+> the `recon` profile.
 
 ## What this is
 
@@ -20,32 +28,31 @@ whole discrepancy vector with context, and is honest about boundary uncertainty.
 
 **Don't fuzzify the counting — fuzzify the verdict.**
 
-- **Layer 1 (`recon/`)** is deterministic, exact, auditable. It produces the
-  discrepancy vector. No fuzziness lives here.
-- **Layer 2 (`fuzzy/`)** is the IT2 + CWW verdict engine. It consumes Layer 1's
-  vector and never touches raw records.
+- **Layer 1 (deterministic)** — the data extractor (a ClickHouse aggregation in
+  production, or `verdicts/demo.py` in demo mode) produces the crisp discrepancy
+  vector. No fuzziness lives here.
+- **Layer 2 (`verdicts/`)** — the IT2 + CWW verdict engine (`engine.py` + the
+  per-report `profiles.py`) consumes that vector and never touches raw records.
 
 Keep that boundary. If a change blurs it, it's the wrong change.
 
 ## Layout
 
 ```
-radonaix-recon-mvp/
-├── recon/
-│   ├── normalize.py   # 4 CSV extracts -> one canonical schema
-│   └── engine.py      # canonical -> per (record_type, hour) discrepancy vector
-├── fuzzy/
+backend/app/modules/assurance/
+├── verdicts/
+│   ├── engine.py      # report-agnostic: VerdictProfile + score() + shared codebook
+│   ├── profiles.py    # the 7 profiles (vocab + rule base) + registry
 │   ├── it2.py         # IT2 trapezoids, rule firing, Nie-Tan reduction, Jaccard
-│   └── verdict.py     # input/output vocab (FOUs), rule base, CWW decoder
-├── demo/
-│   ├── injector.py    # replays real records across simulated 48h + scenarios
-│   ├── run_demo.py    # full pipeline runner + console report
-│   └── dashboard_template.jsx  # React dashboard; __DATA__ placeholder
-├── data/              # the 5 provided CSVs (read-only source)
-└── out/               # generated: verdicts csv, injection log, dashboard json
+│   ├── demo.py        # per-profile synthetic timelines (demo mode)
+│   └── benchmark.py   # fuzzy-vs-crisp-baseline labelled harness
+├── service.py         # ClickHouse aggregation (recon) + demo dispatch + roll-up
+├── router.py          # /recon/verdicts, /verdicts, /verdicts/profiles, /verdicts/benchmark
+└── schemas.py         # VerdictRow / ProfileVerdictRow / BenchmarkReport
 ```
 
-Run everything: `python3 demo/run_demo.py` (deps: pandas, numpy only).
+The UI "Fuzzy Verdicts" screen is `ui/src/routes/reconciliation.tsx`. See
+[README.md](README.md) to run locally. Tests: `backend/tests/test_verdicts.py`.
 
 ## Confirmed decisions — treat as settled
 

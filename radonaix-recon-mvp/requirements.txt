@@ -1,6 +1,0 @@
-# Runtime dependencies — pinned to versions verified working (Python 3.9+).
-# tzdata is required so Asia/Kolkata localisation works on Linux/Docker
-# (macOS has system zoneinfo, most containers do not).
-pandas==2.3.3
-numpy==2.0.2
-tzdata==2026.2
