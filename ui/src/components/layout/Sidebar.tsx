@@ -2,7 +2,6 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   ShieldAlert,
-  Gauge,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -20,7 +19,6 @@ interface NavItem {
 }
 
 const TOP: NavItem = { to: "/", label: "Dashboard & KPIs", icon: LayoutDashboard, perm: "dashboard" };
-const BOTTOM: NavItem = { to: "/monitoring", label: "System Monitoring", icon: Gauge, perm: "settings" };
 
 // Group the verdict profiles under sub-headers, like the reports catalog.
 const CATEGORY: Record<string, string> = {
@@ -53,7 +51,6 @@ export function Sidebar({
   const [open, setOpen] = useState(onVerdicts);
 
   const canDashboard = !!permissions["dashboard"]?.view;
-  const canSettings = !!permissions["settings"]?.view;
 
   useEffect(() => {
     if (canDashboard) verdictService.profiles().then(setProfiles);
@@ -181,7 +178,6 @@ export function Sidebar({
           </div>
         )}
 
-        {canSettings && renderPlain(BOTTOM)}
       </nav>
 
       <div className={`px-4 py-4 border-t border-sidebar-border text-[11px] text-sidebar-foreground/50 ${collapsed ? "text-center" : ""}`}>

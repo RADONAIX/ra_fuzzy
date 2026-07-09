@@ -46,7 +46,6 @@ export const PATH_TO_PERM: Record<string, PermKey> = {
   "/roles": "roleManagement",
   "/system-config": "settings",
   "/audit-logs": "settings",
-  "/monitoring": "settings",
 };
 
 const ALL_TRUE: PermissionMap = {

@@ -19,7 +19,6 @@ export const FR: Record<string, string> = {
   "Dashboard & KPIs": "Tableau de bord et KPI",
   "Reports & Certified Exports": "Rapports et exports certifiés",
   "Pipelines & Job Monitor": "Pipelines et suivi des tâches",
-  "System Monitoring": "Supervision du système",
   MODULES: "MODULES",
   "Revenue Assurance": "Assurance des revenus",
   soon: "bientôt",

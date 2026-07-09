@@ -14,7 +14,6 @@ import { Route as SystemConfigRouteImport } from './routes/system-config'
 import { Route as RolesRouteImport } from './routes/roles'
 import { Route as ReconciliationRouteImport } from './routes/reconciliation'
 import { Route as ProfileRouteImport } from './routes/profile'
-import { Route as MonitoringRouteImport } from './routes/monitoring'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuditLogsRouteImport } from './routes/audit-logs'
 import { Route as AccessDeniedRouteImport } from './routes/access-denied'
@@ -45,11 +44,6 @@ const ProfileRoute = ProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MonitoringRoute = MonitoringRouteImport.update({
-  id: '/monitoring',
-  path: '/monitoring',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -76,7 +70,6 @@ export interface FileRoutesByFullPath {
   '/access-denied': typeof AccessDeniedRoute
   '/audit-logs': typeof AuditLogsRoute
   '/login': typeof LoginRoute
-  '/monitoring': typeof MonitoringRoute
   '/profile': typeof ProfileRoute
   '/reconciliation': typeof ReconciliationRoute
   '/roles': typeof RolesRoute
@@ -88,7 +81,6 @@ export interface FileRoutesByTo {
   '/access-denied': typeof AccessDeniedRoute
   '/audit-logs': typeof AuditLogsRoute
   '/login': typeof LoginRoute
-  '/monitoring': typeof MonitoringRoute
   '/profile': typeof ProfileRoute
   '/reconciliation': typeof ReconciliationRoute
   '/roles': typeof RolesRoute
@@ -101,7 +93,6 @@ export interface FileRoutesById {
   '/access-denied': typeof AccessDeniedRoute
   '/audit-logs': typeof AuditLogsRoute
   '/login': typeof LoginRoute
-  '/monitoring': typeof MonitoringRoute
   '/profile': typeof ProfileRoute
   '/reconciliation': typeof ReconciliationRoute
   '/roles': typeof RolesRoute
@@ -115,7 +106,6 @@ export interface FileRouteTypes {
     | '/access-denied'
     | '/audit-logs'
     | '/login'
-    | '/monitoring'
     | '/profile'
     | '/reconciliation'
     | '/roles'
@@ -127,7 +117,6 @@ export interface FileRouteTypes {
     | '/access-denied'
     | '/audit-logs'
     | '/login'
-    | '/monitoring'
     | '/profile'
     | '/reconciliation'
     | '/roles'
@@ -139,7 +128,6 @@ export interface FileRouteTypes {
     | '/access-denied'
     | '/audit-logs'
     | '/login'
-    | '/monitoring'
     | '/profile'
     | '/reconciliation'
     | '/roles'
@@ -152,7 +140,6 @@ export interface RootRouteChildren {
   AccessDeniedRoute: typeof AccessDeniedRoute
   AuditLogsRoute: typeof AuditLogsRoute
   LoginRoute: typeof LoginRoute
-  MonitoringRoute: typeof MonitoringRoute
   ProfileRoute: typeof ProfileRoute
   ReconciliationRoute: typeof ReconciliationRoute
   RolesRoute: typeof RolesRoute
@@ -197,13 +184,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/monitoring': {
-      id: '/monitoring'
-      path: '/monitoring'
-      fullPath: '/monitoring'
-      preLoaderRoute: typeof MonitoringRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -240,7 +220,6 @@ const rootRouteChildren: RootRouteChildren = {
   AccessDeniedRoute: AccessDeniedRoute,
   AuditLogsRoute: AuditLogsRoute,
   LoginRoute: LoginRoute,
-  MonitoringRoute: MonitoringRoute,
   ProfileRoute: ProfileRoute,
   ReconciliationRoute: ReconciliationRoute,
   RolesRoute: RolesRoute,
