@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     export_xaccel_enabled: bool = True
     export_xaccel_location: str = "/_export_files"
 
+    # Demo mode for the verdicts screen: when true, /recon/verdicts returns a
+    # synthetic timeline scored by the real IT2+CWW engine (no ClickHouse needed).
+    # For demos/local only — keep false in production.
+    verdicts_demo_mode: bool = False
+
     # --- ra-platform integration: ClickHouse (read-only recon data) --------
     clickhouse_enabled: bool = True
     clickhouse_host: str = "localhost"

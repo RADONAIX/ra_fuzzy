@@ -92,12 +92,98 @@ RECON = VerdictProfile(
     inputs=("count_gap", "value_gap", "dup_rate", "catchup", "mismatch", "traffic"),
     vocab=_RECON_VOCAB,
     rules=_RECON_RULES,
+    entity_label="Record type",
+    metric_labels={
+        "count_gap": "Count gap %",
+        "value_gap": "Value gap %",
+        "catchup": "Catch-up %",
+        "dup_rate": "Dup rate %",
+        "mismatch": "Mismatch %",
+        "traffic": "Traffic %",
+    },
 )
+
+
+# ===========================================================================
+# Profile: file_sequence — Missing File Sequence (FR-038–043)
+# ===========================================================================
+# Per (source, hour) "sequence severity". Reuses the recon catch-up idea:
+# a sequence number that arrives LATE (delayed) is latency, not a true miss —
+# so a high delayed_share pulls the verdict down, exactly like catch-up.
+_FILESEQ_VOCAB: dict[str, dict[str, IT2Trap]] = {
+    # % of expected sequence numbers absent this hour (missing + delayed)
+    "seq_gap": {
+        "negligible": IT2Trap("negligible", (0, 0, 0.3, 1.0), (0, 0, 0.2, 0.6)),
+        "small": IT2Trap("small", (0.2, 0.8, 2.0, 4.0), (0.5, 1.0, 1.6, 3.0)),
+        "moderate": IT2Trap("moderate", (2.0, 4.0, 8.0, 15.0), (3.0, 5.0, 7.0, 12.0)),
+        "large": IT2Trap("large", (8.0, 15.0, 100, 100), (12.0, 20.0, 100, 100)),
+    },
+    # % of that gap explained by late-but-arrived files (the catch-up analog)
+    "delayed_share": {
+        "low": IT2Trap("low", (0, 0, 30, 60), (0, 0, 20, 45)),
+        "high": IT2Trap("high", (40, 70, 100, 100), (55, 85, 100, 100)),
+    },
+    # % of files arriving out of sequence order (independent integrity risk)
+    "out_of_order": {
+        "low": IT2Trap("low", (0, 0, 0.2, 1.0), (0, 0, 0.1, 0.5)),
+        "high": IT2Trap("high", (0.3, 2.0, 100, 100), (1.0, 4.0, 100, 100)),
+    },
+    # largest CONSECUTIVE missing run (count of files) — a big contiguous hole is
+    # worse than the same count scattered
+    "gap_span": {
+        "small": IT2Trap("small", (0, 0, 3, 8), (0, 0, 2, 6)),
+        "large": IT2Trap("large", (5, 12, 10000, 10000), (9, 20, 10000, 10000)),
+    },
+    "traffic": {
+        "quiet": IT2Trap("quiet", (0, 0, 15, 35), (0, 0, 10, 25)),
+        "normal": IT2Trap("normal", (15, 35, 60, 80), (25, 42, 55, 70)),
+        "peak": IT2Trap("peak", (60, 80, 100, 100), (70, 90, 100, 100)),
+    },
+}
+
+_FILESEQ_RULES: list[Rule] = [
+    # clean
+    Rule({"seq_gap": "negligible", "out_of_order": "low"}, "Healthy"),
+    # small gap: delayed-share decides (late files caught up = latency)
+    Rule({"seq_gap": "small", "delayed_share": "high"}, "Healthy", 0.9),
+    Rule({"seq_gap": "small", "delayed_share": "low", "traffic": "normal"}, "Watch"),
+    Rule({"seq_gap": "small", "delayed_share": "low", "traffic": "peak"}, "Suspect"),
+    # moderate gap
+    Rule({"seq_gap": "moderate", "delayed_share": "high"}, "Watch"),
+    Rule({"seq_gap": "moderate", "delayed_share": "low"}, "Suspect"),
+    Rule({"seq_gap": "moderate", "delayed_share": "low", "traffic": "peak"}, "Critical", 0.8),
+    # large gap
+    Rule({"seq_gap": "large", "delayed_share": "high"}, "Suspect"),
+    Rule({"seq_gap": "large", "delayed_share": "low"}, "Critical"),
+    # a big contiguous hole escalates on its own (a whole batch window is gone)
+    Rule({"gap_span": "large"}, "Suspect", 0.9),
+    Rule({"gap_span": "large", "traffic": "peak"}, "Critical", 0.7),
+    # ordering problems: a milder, independent risk
+    Rule({"out_of_order": "high"}, "Watch", 0.7),
+    Rule({"out_of_order": "high", "seq_gap": "moderate"}, "Suspect", 0.7),
+]
+
+FILE_SEQUENCE = VerdictProfile(
+    key="file_sequence",
+    label="Missing File Sequence",
+    inputs=("seq_gap", "delayed_share", "out_of_order", "gap_span", "traffic"),
+    vocab=_FILESEQ_VOCAB,
+    rules=_FILESEQ_RULES,
+    entity_label="Source",
+    metric_labels={
+        "seq_gap": "Seq gap %",
+        "delayed_share": "Delayed %",
+        "out_of_order": "Out-of-order %",
+        "gap_span": "Max gap",
+        "traffic": "Traffic %",
+    },
+)
+
 
 # ===========================================================================
 # Registry
 # ===========================================================================
-PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON,)}
+PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON, FILE_SEQUENCE)}
 
 # Fail at import time if any profile has a rule/vocab/codebook mismatch.
 for _profile in PROFILES.values():

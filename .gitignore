@@ -31,3 +31,6 @@ radonaix-recon-mvp/data/
 *.zip
 .idea/
 .vscode/
+
+# local throwaway postgres (do not commit)
+backend/.localdb/

@@ -151,3 +151,36 @@ export const reconVerdictService = {
   list: (hours = 48, stream = "air") =>
     safeGet<VerdictRow[]>(`/recon/verdicts?hours=${hours}&stream=${stream}`, []),
 };
+
+// --- Generic, profile-driven verdicts (recon, file_sequence, …) ------------
+export interface ProfileMetric {
+  key: string;
+  label: string;
+}
+
+export interface ProfileInfo {
+  key: string;
+  label: string;
+  entityLabel: string; // what the scored entity is called (Record type / Source / …)
+  metrics: ProfileMetric[]; // ordered — drives the table columns
+}
+
+export interface ProfileVerdictRow {
+  profile: string;
+  entity: string;
+  hour: string;
+  verdict: Verdict;
+  score: number;
+  bandLo: number;
+  bandHi: number;
+  similarity: number;
+  metrics: Record<string, number>; // the crisp fuzzy inputs (report-specific)
+  context: Record<string, number>; // extra counts for the detail panel
+  drivers: VerdictDriver[];
+}
+
+export const verdictService = {
+  profiles: () => safeGet<ProfileInfo[]>(`/verdicts/profiles`, []),
+  list: (profile: string, hours = 48) =>
+    safeGet<ProfileVerdictRow[]>(`/verdicts?profile=${profile}&hours=${hours}`, []),
+};

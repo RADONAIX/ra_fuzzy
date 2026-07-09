@@ -40,6 +40,28 @@ async def recon_verdicts(
     return await service.recon_verdicts(stream=stream, hours=hours)
 
 
+# --- Generic profile-driven verdicts (recon, file_sequence, …) -------------
+verdicts_router = APIRouter(prefix="/verdicts", tags=["verdicts"])
+
+
+@verdicts_router.get("/profiles", response_model=list[schemas.ProfileInfo])
+async def verdict_profiles(
+    _: Principal = Depends(require(PermKey.DASHBOARD, "view")),
+) -> list[schemas.ProfileInfo]:
+    """List every registered verdict profile + its display metadata."""
+    return service.list_verdict_profiles()
+
+
+@verdicts_router.get("", response_model=list[schemas.ProfileVerdictRow])
+async def profile_verdicts(
+    profile: str = Query(default="recon"),
+    hours: int = Query(default=48, ge=1, le=720),
+    _: Principal = Depends(require(PermKey.DASHBOARD, "view")),
+) -> list[schemas.ProfileVerdictRow]:
+    """Hourly IT2 + CWW verdicts for any report profile (verdict + band + rule trace)."""
+    return await service.profile_verdicts(profile=profile, hours=hours)
+
+
 # --- Cases -----------------------------------------------------------------
 cases_router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -132,5 +154,6 @@ async def stats(
 
 router = APIRouter()
 router.include_router(recon_router)
+router.include_router(verdicts_router)
 #router.include_router(cases_router)
 #router.include_router(workbench_router)

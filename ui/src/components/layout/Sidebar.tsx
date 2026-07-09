@@ -19,7 +19,7 @@ interface NavItem {
 
 const items: NavItem[] = [
   { to: "/", label: "Dashboard & KPIs", icon: LayoutDashboard, badge: null, perm: "dashboard" },
-  { to: "/reconciliation", label: "Reconciliation Verdicts", icon: ShieldAlert, badge: null, perm: "dashboard" },
+  { to: "/reconciliation", label: "Fuzzy Verdicts", icon: ShieldAlert, badge: null, perm: "dashboard" },
   { to: "/monitoring", label: "System Monitoring", icon: Gauge, badge: null, perm: "settings" },
 ];
 

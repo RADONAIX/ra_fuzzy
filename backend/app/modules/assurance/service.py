@@ -14,7 +14,8 @@ from app.core.logging import get_logger
 from app.integrations import clickhouse
 from app.modules.assurance import schemas
 from app.modules.assurance.models import Case, CaseComment, SavedQuery
-from app.modules.assurance.verdicts import get_profile, score
+from app.modules.assurance.verdicts import PROFILES, get_profile, score
+from app.modules.assurance.verdicts.demo import generate_demo_vectors, generate_profile_demo
 
 log = get_logger("assurance")
 
@@ -211,6 +212,46 @@ def _fmt_driver(d: dict) -> schemas.VerdictDriver:
     return schemas.VerdictDriver(rule=rule, consequent=d["consequent"], firingLo=f_lo, firingHi=f_hi)
 
 
+def _row_from_vector(rt: str, hour, vec: dict) -> schemas.VerdictRow:
+    """Score one crisp discrepancy vector (real or demo) into a VerdictRow."""
+    scored = score(
+        _RECON_PROFILE,
+        {
+            "count_gap": vec["count_gap_pct"],
+            "value_gap": vec["value_gap_pct"],
+            "dup_rate": vec["dup_rate_pct"],
+            "catchup": vec["catchup_rate_pct"],
+            "mismatch": vec["mismatch_rate_pct"],
+            "traffic": vec["traffic_pct"],
+        },
+    )
+    band_lo, band_hi = scored["band"]
+    return schemas.VerdictRow(
+        recordType=rt,
+        hour=hour,
+        rawCount=vec["raw_count"],
+        procCount=vec["proc_count"],
+        matched=vec["matched"],
+        catchup=vec["catchup"],
+        rawOnly=vec["raw_only"],
+        procOnly=vec["proc_only"],
+        dupCount=vec["dup_count"],
+        amtMismatch=vec["amt_mismatch"],
+        countGapPct=round(vec["count_gap_pct"], 3),
+        valueGapPct=round(vec["value_gap_pct"], 3),
+        dupRatePct=round(vec["dup_rate_pct"], 3),
+        catchupRatePct=round(vec["catchup_rate_pct"], 3),
+        mismatchRatePct=round(vec["mismatch_rate_pct"], 3),
+        trafficPct=round(vec["traffic_pct"], 3),
+        verdict=scored["verdict"],
+        score=scored["score"],
+        bandLo=band_lo,
+        bandHi=band_hi,
+        similarity=scored["similarity"],
+        drivers=[_fmt_driver(d) for d in scored["drivers"]],
+    )
+
+
 async def recon_verdicts(*, stream: str = "air", hours: int = 48) -> list[schemas.VerdictRow]:
     """Derive the hourly discrepancy vector from the stream's source unions and
     classify each (record_type, hour) with the IT2 + CWW verdict engine.
@@ -218,7 +259,12 @@ async def recon_verdicts(*, stream: str = "air", hours: int = 48) -> list[schema
     Compute-on-read: two ClickHouse aggregations + in-process scoring. If
     ClickHouse is unavailable this degrades to an empty list (like recon_summary)
     rather than erroring the dashboard.
+
+    When ``settings.verdicts_demo_mode`` is on, returns a generated synthetic
+    timeline scored by the real engine (for demos without a live ClickHouse).
     """
+    if settings.verdicts_demo_mode:
+        return [_row_from_vector(rt, hour, vec) for rt, hour, vec in generate_demo_vectors(hours)]
     try:
         s = _stream(stream)
         ident = _ident()
@@ -261,45 +307,75 @@ async def recon_verdicts(*, stream: str = "air", hours: int = 48) -> list[schema
         mismatch_rate_pct = amt_mismatch / matched * 100 if matched else 0.0
         traffic_pct = raw_count / peak[rt] * 100 if peak.get(rt) else 0.0
 
-        scored = score(
-            _RECON_PROFILE,
-            {
-                "count_gap": count_gap_pct,
-                "value_gap": value_gap_pct,
-                "dup_rate": dup_rate_pct,
-                "catchup": catchup_rate_pct,
-                "mismatch": mismatch_rate_pct,
-                "traffic": traffic_pct,
-            },
-        )
-        band_lo, band_hi = scored["band"]
+        vec = {
+            "raw_count": raw_count,
+            "proc_count": proc_count,
+            "matched": matched,
+            "catchup": catchup,
+            "raw_only": raw_only,
+            "proc_only": proc_only,
+            "dup_count": dup_count,
+            "amt_mismatch": amt_mismatch,
+            "count_gap_pct": count_gap_pct,
+            "value_gap_pct": value_gap_pct,
+            "dup_rate_pct": dup_rate_pct,
+            "catchup_rate_pct": catchup_rate_pct,
+            "mismatch_rate_pct": mismatch_rate_pct,
+            "traffic_pct": traffic_pct,
+        }
+        out.append(_row_from_vector(rt, hour, vec))
+    return out
+
+
+# --- Generic profile-driven verdicts (any report) --------------------------
+def list_verdict_profiles() -> list[schemas.ProfileInfo]:
+    """Every registered verdict profile + its display metadata (drives the UI)."""
+    out = []
+    for p in PROFILES.values():
+        metrics = [schemas.ProfileMetric(key=k, label=p.metric_labels.get(k, k)) for k in p.inputs]
         out.append(
-            schemas.VerdictRow(
-                recordType=rt,
-                hour=hour,
-                rawCount=raw_count,
-                procCount=proc_count,
-                matched=matched,
-                catchup=catchup,
-                rawOnly=raw_only,
-                procOnly=proc_only,
-                dupCount=dup_count,
-                amtMismatch=amt_mismatch,
-                countGapPct=round(count_gap_pct, 3),
-                valueGapPct=round(value_gap_pct, 3),
-                dupRatePct=round(dup_rate_pct, 3),
-                catchupRatePct=round(catchup_rate_pct, 3),
-                mismatchRatePct=round(mismatch_rate_pct, 3),
-                trafficPct=round(traffic_pct, 3),
-                verdict=scored["verdict"],
-                score=scored["score"],
-                bandLo=band_lo,
-                bandHi=band_hi,
-                similarity=scored["similarity"],
-                drivers=[_fmt_driver(d) for d in scored["drivers"]],
-            )
+            schemas.ProfileInfo(key=p.key, label=p.label, entityLabel=p.entity_label, metrics=metrics)
         )
     return out
+
+
+def _generic_row(prof, entity: str, hour, metrics: dict, context: dict) -> schemas.ProfileVerdictRow:
+    scored = score(prof, metrics)
+    band_lo, band_hi = scored["band"]
+    return schemas.ProfileVerdictRow(
+        profile=prof.key,
+        entity=entity,
+        hour=hour,
+        verdict=scored["verdict"],
+        score=scored["score"],
+        bandLo=band_lo,
+        bandHi=band_hi,
+        similarity=scored["similarity"],
+        metrics={k: round(float(v), 3) for k, v in metrics.items()},
+        context={k: round(float(v), 3) for k, v in context.items()},
+        drivers=[_fmt_driver(d) for d in scored["drivers"]],
+    )
+
+
+async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[schemas.ProfileVerdictRow]:
+    """Verdicts for any registered profile. In demo mode returns a synthetic
+    timeline scored by the real engine; real ClickHouse extractors per report are
+    wired as their data sources come online."""
+    try:
+        prof = get_profile(profile)
+    except KeyError as exc:
+        raise NotFoundError(str(exc)) from exc
+
+    if settings.verdicts_demo_mode:
+        return [
+            _generic_row(prof, entity, hour, metrics, context)
+            for entity, hour, metrics, context in generate_profile_demo(profile, hours)
+        ]
+
+    # Real mode: recon has a ClickHouse extractor today; other profiles return
+    # empty until their source-table extractor is wired (see roadmap).
+    log.info("profile_verdicts_no_extractor", profile=profile, mode="real")
+    return []
 
 
 # --- Cases -----------------------------------------------------------------

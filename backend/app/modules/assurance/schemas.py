@@ -76,6 +76,33 @@ class VerdictRow(BaseModel):
     drivers: list[VerdictDriver]
 
 
+# --- Generic profile-driven verdicts (any report) --------------------------
+class ProfileMetric(BaseModel):
+    key: str
+    label: str
+
+
+class ProfileInfo(BaseModel):
+    key: str
+    label: str
+    entityLabel: str
+    metrics: list[ProfileMetric]  # ordered — drives the UI columns
+
+
+class ProfileVerdictRow(BaseModel):
+    profile: str
+    entity: str  # record type / source / event-type, per the report
+    hour: datetime
+    verdict: Verdict
+    score: float
+    bandLo: float
+    bandHi: float
+    similarity: float
+    metrics: dict[str, float]  # the crisp fuzzy inputs (report-specific)
+    context: dict[str, float]  # extra counts shown in the detail panel
+    drivers: list[VerdictDriver]
+
+
 # --- Cases -----------------------------------------------------------------
 class CaseRow(BaseModel):
     id: str

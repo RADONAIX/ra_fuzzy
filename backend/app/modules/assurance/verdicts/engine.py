@@ -43,12 +43,19 @@ class VerdictProfile:
     vocab: Mapping[str, Mapping[str, IT2Trap]]
     rules: Sequence[Rule]
     codebook: Mapping[str, IT2Trap] = field(default_factory=lambda: DEFAULT_CODEBOOK)
+    # Display metadata (drives the generic UI): what the scored entity is called
+    # (e.g. "Record type", "Source") and a human label per input metric.
+    entity_label: str = "Entity"
+    metric_labels: Mapping[str, str] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Fail fast on rule/vocab/codebook mismatches (a typo in a rule term)."""
         for var in self.vocab:
             if var not in self.inputs:
                 raise ValueError(f"{self.key}: vocab var '{var}' is not in inputs")
+        for var in self.metric_labels:
+            if var not in self.inputs:
+                raise ValueError(f"{self.key}: metric_label '{var}' is not in inputs")
         for i, r in enumerate(self.rules):
             for var, term in r.antecedents.items():
                 if var not in self.vocab:
