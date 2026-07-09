@@ -101,25 +101,12 @@ function LoginPage() {
       {/* Right: form */}
       <div className="flex items-center justify-center p-6 sm:p-12 bg-card">
         <div className="w-full max-w-md">
-          {/* MTN logo */}
+          {/* RADONaix logo */}
           <div className="mb-10">
             <div className="h-14 w-14 rounded-xl bg-primary flex items-center justify-center shadow-sm">
-              <svg viewBox="0 0 120 72" className="h-11 w-14" role="img" aria-label="MTN">
-                <ellipse cx="60" cy="36" rx="54" ry="29" fill="none" stroke="#000" strokeWidth="7" />
-                <text
-                  x="60"
-                  y="37"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontFamily="Arial, Helvetica, sans-serif"
-                  fontWeight="800"
-                  fontSize="30"
-                  letterSpacing="-1"
-                  fill="#000"
-                >
-                  MTN
-                </text>
-              </svg>
+              <span className="text-primary-foreground font-extrabold text-xl tracking-tight" aria-label="RADONaix">
+                RA
+              </span>
             </div>
           </div>
 

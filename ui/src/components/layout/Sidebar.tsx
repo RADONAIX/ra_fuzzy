@@ -102,22 +102,9 @@ export function Sidebar({
     >
       <div className="px-4 py-5 border-b border-sidebar-border flex items-center gap-3 relative">
         <div className="h-12 w-12 shrink-0 rounded-xl bg-primary flex items-center justify-center shadow-md">
-          <svg viewBox="0 0 120 72" className="h-10 w-12" role="img" aria-label="MTN">
-            <ellipse cx="60" cy="36" rx="54" ry="29" fill="none" stroke="#000" strokeWidth="7" />
-            <text
-              x="60"
-              y="37"
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontFamily="Arial, Helvetica, sans-serif"
-              fontWeight="800"
-              fontSize="30"
-              letterSpacing="-1"
-              fill="#000"
-            >
-              MTN
-            </text>
-          </svg>
+          <span className="text-primary-foreground font-extrabold text-lg tracking-tight" aria-label="RADONaix">
+            RA
+          </span>
         </div>
         {!collapsed && (
           <div className="min-w-0 transition-opacity">
