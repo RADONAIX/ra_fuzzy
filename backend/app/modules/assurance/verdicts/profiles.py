@@ -181,9 +181,70 @@ FILE_SEQUENCE = VerdictProfile(
 
 
 # ===========================================================================
+# Profile: overview — platform health roll-up (FR-060)
+# ===========================================================================
+# A META profile: its inputs are NOT read from a data source but AGGREGATED from
+# the other profiles' verdicts (see assurance.service._overview_vectors). It
+# produces one verdict per scope (each source + PLATFORM), per hour.
+_OVERVIEW_VOCAB: dict[str, dict[str, IT2Trap]] = {
+    # worst child verdict score in the scope/hour (0–100)
+    "worst_score": {
+        "low": IT2Trap("low", (0, 0, 30, 50), (0, 0, 25, 42)),
+        "medium": IT2Trap("medium", (30, 45, 62, 75), (38, 50, 58, 70)),
+        "high": IT2Trap("high", (60, 75, 100, 100), (70, 85, 100, 100)),
+    },
+    # % of child buckets that are Critical
+    "critical_share": {
+        "low": IT2Trap("low", (0, 0, 2, 6), (0, 0, 1, 4)),
+        "high": IT2Trap("high", (3, 10, 100, 100), (6, 15, 100, 100)),
+    },
+    # % of child buckets that are Suspect or worse
+    "suspect_share": {
+        "low": IT2Trap("low", (0, 0, 4, 10), (0, 0, 3, 7)),
+        "moderate": IT2Trap("moderate", (6, 14, 28, 45), (10, 18, 25, 38)),
+        "high": IT2Trap("high", (28, 50, 100, 100), (38, 60, 100, 100)),
+    },
+    # % of report types in the scope showing Suspect+ (how broad the trouble is)
+    "breadth": {
+        "narrow": IT2Trap("narrow", (0, 0, 30, 55), (0, 0, 22, 45)),
+        "wide": IT2Trap("wide", (45, 70, 100, 100), (58, 82, 100, 100)),
+    },
+}
+
+_OVERVIEW_RULES: list[Rule] = [
+    Rule({"worst_score": "low", "suspect_share": "low"}, "Healthy"),
+    Rule({"worst_score": "medium", "critical_share": "low"}, "Watch"),
+    Rule({"worst_score": "medium", "suspect_share": "moderate"}, "Suspect"),
+    Rule({"worst_score": "high", "critical_share": "low"}, "Suspect"),
+    Rule({"worst_score": "high", "critical_share": "high"}, "Critical"),
+    Rule({"critical_share": "high"}, "Critical", 0.9),
+    # widespread trouble escalates even without a single Critical child
+    Rule({"suspect_share": "high", "breadth": "wide"}, "Critical", 0.8),
+    Rule({"suspect_share": "moderate", "breadth": "wide"}, "Suspect", 0.9),
+    Rule({"suspect_share": "moderate"}, "Watch", 0.7),
+    Rule({"breadth": "wide", "worst_score": "medium"}, "Suspect", 0.7),
+]
+
+OVERVIEW = VerdictProfile(
+    key="overview",
+    label="Platform health roll-up",
+    inputs=("worst_score", "critical_share", "suspect_share", "breadth"),
+    vocab=_OVERVIEW_VOCAB,
+    rules=_OVERVIEW_RULES,
+    entity_label="Scope",
+    metric_labels={
+        "worst_score": "Worst score",
+        "critical_share": "Critical %",
+        "suspect_share": "Suspect+ %",
+        "breadth": "Breadth %",
+    },
+)
+
+
+# ===========================================================================
 # Registry
 # ===========================================================================
-PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON, FILE_SEQUENCE)}
+PROFILES: dict[str, VerdictProfile] = {p.key: p for p in (RECON, FILE_SEQUENCE, OVERVIEW)}
 
 # Fail at import time if any profile has a rule/vocab/codebook mismatch.
 for _profile in PROFILES.values():

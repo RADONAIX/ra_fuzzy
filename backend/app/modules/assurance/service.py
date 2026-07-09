@@ -357,6 +357,48 @@ def _generic_row(prof, entity: str, hour, metrics: dict, context: dict) -> schem
     )
 
 
+# The overview roll-up (FR-060) is a META profile: its inputs are aggregated
+# from the other profiles' verdicts rather than read from a data source.
+_OVERVIEW_CHILDREN = ("recon", "file_sequence")
+
+
+def _child_scope(profile_key: str, entity: str) -> str:
+    # recon is AIR-only (REFILL/ADJUSTMENT record types); file_sequence's entity
+    # IS the source (AIR/SDP).
+    return "AIR" if profile_key == "recon" else entity
+
+
+def _overview_vectors(hours: int) -> list[tuple[str, object, dict, dict]]:
+    """Roll the child profiles' verdicts up into (scope, hour, metrics, context)
+    for each source and for PLATFORM."""
+    groups: dict[tuple, list[dict]] = {}
+    for key in _OVERVIEW_CHILDREN:
+        prof = get_profile(key)
+        for entity, hour, metrics, _ctx in generate_profile_demo(key, hours):
+            v = score(prof, metrics)
+            item = {"report": key, "verdict": v["verdict"], "score": v["score"]}
+            for scope in (_child_scope(key, entity), "PLATFORM"):
+                groups.setdefault((scope, hour), []).append(item)
+
+    out: list[tuple[str, object, dict, dict]] = []
+    for (scope, hour), items in groups.items():
+        n = len(items)
+        crit = sum(1 for i in items if i["verdict"] == "Critical")
+        susp = sum(1 for i in items if i["verdict"] in ("Suspect", "Critical"))
+        reports = {i["report"] for i in items}
+        reports_bad = {i["report"] for i in items if i["verdict"] in ("Suspect", "Critical")}
+        metrics = {
+            "worst_score": max(i["score"] for i in items),
+            "critical_share": crit / n * 100 if n else 0.0,
+            "suspect_share": susp / n * 100 if n else 0.0,
+            "breadth": len(reports_bad) / len(reports) * 100 if reports else 0.0,
+        }
+        context = {"children": n, "critical": crit, "suspect_plus": susp, "reports": len(reports)}
+        out.append((scope, hour, metrics, context))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+
 async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[schemas.ProfileVerdictRow]:
     """Verdicts for any registered profile. In demo mode returns a synthetic
     timeline scored by the real engine; real ClickHouse extractors per report are
@@ -367,9 +409,14 @@ async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[s
         raise NotFoundError(str(exc)) from exc
 
     if settings.verdicts_demo_mode:
+        vectors = (
+            _overview_vectors(hours)
+            if profile == "overview"
+            else generate_profile_demo(profile, hours)
+        )
         return [
             _generic_row(prof, entity, hour, metrics, context)
-            for entity, hour, metrics, context in generate_profile_demo(profile, hours)
+            for entity, hour, metrics, context in vectors
         ]
 
     # Real mode: recon has a ClickHouse extractor today; other profiles return
