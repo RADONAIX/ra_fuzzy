@@ -62,6 +62,16 @@ async def profile_verdicts(
     return await service.profile_verdicts(profile=profile, hours=hours)
 
 
+@verdicts_router.get("/benchmark", response_model=schemas.BenchmarkReport)
+async def verdict_benchmark(
+    profile: str = Query(default="recon"),
+    _: Principal = Depends(require(PermKey.DASHBOARD, "view")),
+) -> schemas.BenchmarkReport:
+    """Fuzzy vs crisp-threshold baseline on a labelled set (precision/recall/F1 +
+    catch-up false alarms) — evidence the fuzzy layer earns its place."""
+    return service.verdict_benchmark_report(profile)
+
+
 # --- Cases -----------------------------------------------------------------
 cases_router = APIRouter(prefix="/cases", tags=["cases"])
 

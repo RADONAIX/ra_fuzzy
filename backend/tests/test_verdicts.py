@@ -8,7 +8,7 @@ if a refactor changes any verdict/score here, it changed the classifier.
 
 import pytest
 
-from app.modules.assurance.verdicts import PROFILES, get_profile, score
+from app.modules.assurance.verdicts import PROFILES, benchmark, get_profile, score
 
 # (label, inputs, expected_verdict, expected_score) from the MVP run_demo output.
 # inputs: count_gap, value_gap, dup_rate, catchup, mismatch, traffic
@@ -52,3 +52,23 @@ def test_all_profiles_valid():
 def test_unknown_profile_raises():
     with pytest.raises(KeyError):
         get_profile("does-not-exist")
+
+
+# --- Benchmark: the fuzzy layer must earn its place vs a crisp threshold -----
+@pytest.mark.parametrize("profile_key", ["recon", "file_sequence"])
+def test_benchmark_fuzzy_beats_baseline_on_latency(profile_key):
+    r = benchmark.evaluate(profile_key)
+    assert r is not None
+    la = r["latencyFalseAlarms"]
+    # The core claim: fuzzy discounts catch-up/latency (zero false alarms on
+    # caught-up hours), while the crude threshold trips on every one of them.
+    assert la["total"] > 0
+    assert la["fuzzy"] == 0
+    assert la["baseline"] == la["total"]
+    # Fuzzy is at least competitive on F1 and strictly better on false-alarm rate.
+    assert r["fuzzy"]["f1"] >= r["baseline"]["f1"] - 0.02
+    assert r["fuzzy"]["falseAlarmRate"] < r["baseline"]["falseAlarmRate"]
+
+
+def test_benchmark_absent_for_meta_profile():
+    assert benchmark.evaluate("overview") is None

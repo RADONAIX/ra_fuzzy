@@ -15,6 +15,7 @@ from app.integrations import clickhouse
 from app.modules.assurance import schemas
 from app.modules.assurance.models import Case, CaseComment, SavedQuery
 from app.modules.assurance.verdicts import PROFILES, get_profile, score
+from app.modules.assurance.verdicts import benchmark as verdict_benchmark
 from app.modules.assurance.verdicts.demo import generate_demo_vectors, generate_profile_demo
 
 log = get_logger("assurance")
@@ -334,9 +335,23 @@ def list_verdict_profiles() -> list[schemas.ProfileInfo]:
     for p in PROFILES.values():
         metrics = [schemas.ProfileMetric(key=k, label=p.metric_labels.get(k, k)) for k in p.inputs]
         out.append(
-            schemas.ProfileInfo(key=p.key, label=p.label, entityLabel=p.entity_label, metrics=metrics)
+            schemas.ProfileInfo(
+                key=p.key,
+                label=p.label,
+                entityLabel=p.entity_label,
+                metrics=metrics,
+                hasBenchmark=verdict_benchmark.has_harness(p.key),
+            )
         )
     return out
+
+
+def verdict_benchmark_report(profile: str) -> schemas.BenchmarkReport:
+    """Fuzzy-vs-crisp-baseline benchmark on a labelled set for one profile."""
+    report = verdict_benchmark.evaluate(profile)
+    if report is None:
+        raise NotFoundError(f"No benchmark available for profile {profile!r}.")
+    return schemas.BenchmarkReport(**report)
 
 
 def _generic_row(prof, entity: str, hour, metrics: dict, context: dict) -> schemas.ProfileVerdictRow:

@@ -1,13 +1,15 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { ShieldAlert, RefreshCw, ChevronDown, ChevronRight, Activity } from "lucide-react";
+import { ShieldAlert, RefreshCw, ChevronDown, ChevronRight, Activity, Gauge } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Tooltip } from "@/components/ui-kit/Tooltip";
 import { useT } from "@/lib/i18n";
 import {
   verdictService,
+  type BenchmarkMetrics,
+  type BenchmarkReport,
   type ProfileInfo,
   type ProfileVerdictRow,
   type Verdict,
@@ -62,6 +64,28 @@ function fmtMetric(label: string, v: number) {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
+function MetricCard({ title, m, accent }: { readonly title: string; readonly m: BenchmarkMetrics; readonly accent?: boolean }) {
+  const rows: [string, string][] = [
+    ["F1", m.f1.toFixed(3)],
+    ["Precision", m.precision.toFixed(3)],
+    ["Recall", m.recall.toFixed(3)],
+    ["False-alarm", m.falseAlarmRate.toFixed(3)],
+  ];
+  return (
+    <div className={`rounded-lg border p-3 ${accent ? "border-primary/40 bg-primary/5" : "border-border"}`}>
+      <div className="mb-2 text-xs font-medium text-foreground">{title}</div>
+      <div className="space-y-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{k}</span>
+            <span className="tabular-nums font-medium text-foreground">{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function VerdictsPage() {
   const t = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -73,6 +97,7 @@ function VerdictsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
+  const [benchmark, setBenchmark] = useState<BenchmarkReport | null>(null);
 
   useEffect(() => {
     setAuthed(!!sessionStorage.getItem("radonaix_token"));
@@ -91,6 +116,21 @@ function VerdictsPage() {
     () => profiles.find((p) => p.key === profileKey),
     [profiles, profileKey],
   );
+
+  // Load the fuzzy-vs-baseline benchmark for the selected profile (null if none).
+  useEffect(() => {
+    if (!authed || !profileKey) {
+      setBenchmark(null);
+      return;
+    }
+    let cancelled = false;
+    verdictService.benchmark(profileKey).then((b) => {
+      if (!cancelled) setBenchmark(b);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, profileKey]);
 
   // Load verdicts for the selected profile + window.
   useEffect(() => {
@@ -201,6 +241,41 @@ function VerdictsPage() {
           </button>
         ))}
       </div>
+
+      {/* Benchmark: fuzzy vs crisp baseline (evidence the fuzzy layer earns its place) */}
+      {profile?.hasBenchmark && benchmark && (
+        <div className="mb-5 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <h3 className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+            <Gauge className="h-4 w-4 text-primary" />
+            {t("Fuzzy vs. baseline")}
+            <span className="text-xs font-normal text-muted-foreground">
+              {t("labelled set")}, n={benchmark.sampleSize}
+            </span>
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <MetricCard title={t("Fuzzy (IT2 + CWW)")} m={benchmark.fuzzy} accent />
+            <MetricCard title={`${t("Baseline")} — ${benchmark.baselineName}`} m={benchmark.baseline} />
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs font-medium text-muted-foreground">{t("Catch-up false alarms")}</div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                  {benchmark.latencyFalseAlarms.fuzzy}
+                </span>
+                <span className="text-sm text-muted-foreground">/ {benchmark.latencyFalseAlarms.total} {t("fuzzy")}</span>
+              </div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-semibold tabular-nums text-red-600 dark:text-red-400">
+                  {benchmark.latencyFalseAlarms.baseline}
+                </span>
+                <span className="text-sm text-muted-foreground">/ {benchmark.latencyFalseAlarms.total} {t("baseline")}</span>
+              </div>
+              <div className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                {t("Caught-up hours wrongly flagged. Fuzzy discounts latency; a threshold can't.")}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Verdict distribution strip */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

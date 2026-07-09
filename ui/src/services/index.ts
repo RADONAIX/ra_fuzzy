@@ -163,6 +163,27 @@ export interface ProfileInfo {
   label: string;
   entityLabel: string; // what the scored entity is called (Record type / Source / …)
   metrics: ProfileMetric[]; // ordered — drives the table columns
+  hasBenchmark: boolean;
+}
+
+export interface BenchmarkMetrics {
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  falseAlarmRate: number;
+}
+
+export interface BenchmarkReport {
+  profile: string;
+  sampleSize: number;
+  baselineName: string;
+  fuzzy: BenchmarkMetrics;
+  baseline: BenchmarkMetrics;
+  latencyFalseAlarms: { total: number; fuzzy: number; baseline: number };
 }
 
 export interface ProfileVerdictRow {
@@ -183,4 +204,7 @@ export const verdictService = {
   profiles: () => safeGet<ProfileInfo[]>(`/verdicts/profiles`, []),
   list: (profile: string, hours = 48) =>
     safeGet<ProfileVerdictRow[]>(`/verdicts?profile=${profile}&hours=${hours}`, []),
+  // null when the profile has no benchmark (e.g. the overview roll-up → 404).
+  benchmark: (profile: string) =>
+    safeGet<BenchmarkReport | null>(`/verdicts/benchmark?profile=${profile}`, null),
 };

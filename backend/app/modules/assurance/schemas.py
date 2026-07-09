@@ -87,6 +87,33 @@ class ProfileInfo(BaseModel):
     label: str
     entityLabel: str
     metrics: list[ProfileMetric]  # ordered — drives the UI columns
+    hasBenchmark: bool = False  # whether a labelled benchmark exists for this profile
+
+
+class BenchmarkMetrics(BaseModel):
+    tp: int
+    fp: int
+    fn: int
+    tn: int
+    precision: float
+    recall: float
+    f1: float
+    falseAlarmRate: float
+
+
+class LatencyFalseAlarms(BaseModel):
+    total: int
+    fuzzy: int
+    baseline: int
+
+
+class BenchmarkReport(BaseModel):
+    profile: str
+    sampleSize: int
+    baselineName: str
+    fuzzy: BenchmarkMetrics
+    baseline: BenchmarkMetrics
+    latencyFalseAlarms: LatencyFalseAlarms
 
 
 class ProfileVerdictRow(BaseModel):
