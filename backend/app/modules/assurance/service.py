@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.data_sources import enabled_streams
 from app.core.errors import NotFoundError, UpstreamUnavailableError
 from app.core.logging import get_logger
-from app.integrations import clickhouse
+from app.integrations import clickhouse, ra_postgres
 from app.modules.assurance import schemas
 from app.modules.assurance.models import Case, CaseComment, SavedQuery
 from app.modules.assurance.verdicts import PROFILES, get_profile, score
@@ -419,6 +419,72 @@ def _overview_vectors(hours: int) -> list[tuple[str, object, dict, dict]]:
     return out
 
 
+# --- Real extractors: score live ra-platform data through the same engine ---
+# file_sequence <- bi_reports.air_file_seq_check (Present/Missing per node/day).
+# The source is day-grained and only distinguishes Present vs Missing, so
+# delayed_share / out_of_order are 0 here (no lateness signal in this table);
+# the verdict is driven by missing-rate + the longest consecutive-missing run.
+_FILE_SEQ_SQL = """
+WITH anchor AS (SELECT max(date) AS md FROM bi_reports.air_file_seq_check),
+base AS (
+  SELECT file_node_id AS nid, date AS d, file_sequence AS seq, (status = 'Missing') AS miss
+  FROM bi_reports.air_file_seq_check
+  WHERE date > (SELECT md FROM anchor) - make_interval(days => :days)
+),
+grp AS (
+  SELECT nid, d, miss,
+         seq - row_number() OVER (PARTITION BY nid, d, miss ORDER BY seq) AS island
+  FROM base
+),
+runmax AS (
+  SELECT nid, d, max(run_len) AS mr
+  FROM (SELECT nid, d, count(*) AS run_len FROM grp WHERE miss GROUP BY nid, d, island) x
+  GROUP BY nid, d
+)
+SELECT b.nid, b.d,
+       count(*) AS total,
+       count(*) FILTER (WHERE b.miss) AS missing,
+       COALESCE((SELECT mr FROM runmax r WHERE r.nid = b.nid AND r.d = b.d), 0) AS max_run
+FROM base b GROUP BY b.nid, b.d
+ORDER BY b.d DESC, b.nid
+"""
+
+
+async def _file_sequence_real(hours: int) -> list[schemas.ProfileVerdictRow]:
+    days = max(1, hours // 24)
+    rows = await ra_postgres.query(_FILE_SEQ_SQL, {"days": days})
+    if not rows:
+        return []
+    peak: dict[str, float] = {}
+    for r in rows:
+        peak[r["nid"]] = max(peak.get(r["nid"], 0.0), float(r["total"] or 0))
+    prof = get_profile("file_sequence")
+    out: list[schemas.ProfileVerdictRow] = []
+    for r in rows:
+        nid, d = r["nid"], r["d"]
+        total = int(r["total"] or 0)
+        missing = int(r["missing"] or 0)
+        max_run = int(r["max_run"] or 0)
+        metrics = {
+            "seq_gap": missing / total * 100 if total else 0.0,
+            "delayed_share": 0.0,
+            "out_of_order": 0.0,
+            "gap_span": float(max_run),
+            "traffic": total / peak[nid] * 100 if peak.get(nid) else 0.0,
+        }
+        context = {"total": total, "present": total - missing, "missing": missing, "max_run": max_run}
+        hour = datetime(d.year, d.month, d.day, tzinfo=UTC)
+        out.append(_generic_row(prof, nid, hour, metrics, context))
+    return out
+
+
+# profile key -> real extractor (queries a live source). Others stay demo until
+# their source tables are populated.
+_REAL_EXTRACTORS = {
+    "file_sequence": _file_sequence_real,
+}
+
+
 async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[schemas.ProfileVerdictRow]:
     """Verdicts for any registered profile. In demo mode returns a synthetic
     timeline scored by the real engine; real ClickHouse extractors per report are
@@ -428,6 +494,19 @@ async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[s
     except KeyError as exc:
         raise NotFoundError(str(exc)) from exc
 
+    # 1) Prefer live data when a real extractor is wired and its source is
+    #    reachable with rows; otherwise fall through to demo.
+    extractor = _REAL_EXTRACTORS.get(profile)
+    if extractor is not None:
+        try:
+            real = await extractor(hours)
+        except UpstreamUnavailableError:
+            log.info("real_extractor_unavailable", profile=profile)
+            real = []
+        if real:
+            return real
+
+    # 2) Demo fallback (synthetic timeline scored by the real engine).
     if settings.verdicts_demo_mode:
         vectors = (
             _overview_vectors(hours)
@@ -439,9 +518,7 @@ async def profile_verdicts(*, profile: str = "recon", hours: int = 48) -> list[s
             for entity, hour, metrics, context in vectors
         ]
 
-    # Real mode: recon has a ClickHouse extractor today; other profiles return
-    # empty until their source-table extractor is wired (see roadmap).
-    log.info("profile_verdicts_no_extractor", profile=profile, mode="real")
+    log.info("profile_verdicts_no_data", profile=profile)
     return []
 
 
