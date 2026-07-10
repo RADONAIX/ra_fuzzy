@@ -478,10 +478,54 @@ async def _file_sequence_real(hours: int) -> list[schemas.ProfileVerdictRow]:
     return out
 
 
+# record_sequence <- ClickHouse air_processed_record_sequence_check (per node/day
+# list of missing sequence gaps). The table has NO total record count, so a true
+# gap-rate % is not derivable — the verdict is driven by the worst contiguous gap
+# (max_run) and how clustered the gaps are; gap_rate/traffic stay 0 (documented).
+_RECORD_SEQ_SQL = """
+SELECT node_id AS nid, date AS d,
+       count() AS num_gaps,
+       sum(missing_count) AS total_missing,
+       max(missing_count) AS max_gap
+FROM {ident}.air_processed_record_sequence_check
+WHERE date > (SELECT max(date) FROM {ident}.air_processed_record_sequence_check) - {{days:UInt32}}
+GROUP BY node_id, date
+ORDER BY date DESC, node_id
+"""
+
+
+async def _record_sequence_real(hours: int) -> list[schemas.ProfileVerdictRow]:
+    days = max(1, hours // 24)
+    ident = _ident()
+    rows = await clickhouse.query(_RECORD_SEQ_SQL.format(ident=ident), {"days": days})
+    if not rows:
+        return []
+    prof = get_profile("record_sequence")
+    out: list[schemas.ProfileVerdictRow] = []
+    for r in rows:
+        nid, d = r["nid"], r["d"]
+        num_gaps = int(r["num_gaps"] or 0)
+        total_missing = int(r["total_missing"] or 0)
+        max_gap = int(r["max_gap"] or 0)
+        # clustering: 0 = every miss is its own gap (scattered); ->100 = one hole
+        cluster = 100 * (1 - num_gaps / total_missing) if total_missing else 0.0
+        metrics = {
+            "gap_rate": 0.0,          # true % needs a record total (not in this table)
+            "max_run": float(max_gap),
+            "cluster_ratio": max(0.0, cluster),
+            "traffic": 0.0,
+        }
+        context = {"gaps": num_gaps, "total_missing": total_missing, "max_gap": max_gap}
+        hour = datetime(d.year, d.month, d.day, tzinfo=UTC)
+        out.append(_generic_row(prof, nid, hour, metrics, context))
+    return out
+
+
 # profile key -> real extractor (queries a live source). Others stay demo until
 # their source tables are populated.
 _REAL_EXTRACTORS = {
     "file_sequence": _file_sequence_real,
+    "record_sequence": _record_sequence_real,
 }
 
 
