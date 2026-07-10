@@ -102,6 +102,14 @@ function VerdictsPage() {
     };
   }, [authed, profileKey]);
 
+  // Switching reports: blank the previous report's data immediately so it can
+  // never render under the new report's header/columns while the fetch is in
+  // flight (defence-in-depth is the profile filter in `sorted`/`counts` below).
+  useEffect(() => {
+    setRows(null);
+    setBenchmark(null);
+  }, [profileKey]);
+
   // Load verdicts for the selected profile + window.
   useEffect(() => {
     if (!authed || !profileKey) return;
@@ -128,6 +136,7 @@ function VerdictsPage() {
   const sorted = useMemo(
     () =>
       (rows ?? [])
+        .filter((r) => r.profile === profileKey) // never render another report's rows
         .slice()
         .sort(
           (a, b) =>
@@ -135,14 +144,14 @@ function VerdictsPage() {
             b.score - a.score ||
             a.hour.localeCompare(b.hour),
         ),
-    [rows],
+    [rows, profileKey],
   );
 
   const counts = useMemo(() => {
     const c: Record<Verdict, number> = { Healthy: 0, Watch: 0, Suspect: 0, Critical: 0 };
-    for (const r of rows ?? []) c[r.verdict] += 1;
+    for (const r of rows ?? []) if (r.profile === profileKey) c[r.verdict] += 1;
     return c;
-  }, [rows]);
+  }, [rows, profileKey]);
 
   if (authed === null) return null;
   if (!authed) return <Navigate to="/login" />;
